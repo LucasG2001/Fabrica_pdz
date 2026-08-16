@@ -229,14 +229,15 @@ def load_assembly_plan_info(plan_info_dirname):
 def generate_kuka_urdf_from_plan(plan_info_dir, kuka_dir):
     """Generate URDF files for the KUKA robot with attached objects based on assembly plan info.
 
-    CAVEAT: `arm_q` (the joint angles read from plan_info) is currently produced by the
-    Panda-only `planning/` pipeline (`planning/robot/util_arm.py` has no 'kuka' arm_type yet
-    -- see prepare_isaac_plan_info.py's `assert gripper_type == 'panda'`). This function runs
-    that Panda-planned `arm_q` through forward kinematics on the *KUKA* chain (fabrica_kuka.urdf)
-    to place the held part on the KUKA gripper. Because the two arms' link geometry isn't
-    identical, this is an approximation, not a true KUKA-native plan -- it's only exact once
-    `planning/` gains a real 'kuka' arm_type (own kinematic chain + grasp geometry) so `arm_q`
-    is planned on the KUKA chain to begin with.
+    `planning/` (planning/robot/util_arm.py, geometry.py) now has a native 'kuka' arm/gripper
+    type (assets/kuka/kuka.urdf + meshes, ported from the KUKA rig's own description
+    packages), so assemblies planned with `--arm kuka --gripper kuka` produce `arm_q` values
+    that are natively KUKA joint angles, and this function's forward-kinematics step
+    (using fabrica_kuka.urdf) is exact for them. Assemblies planned before this fork's KUKA
+    support was added (arm_type/gripper_type == 'panda' in their grasps.pkl) still carry
+    Panda-planned `arm_q`; running those through the KUKA chain here is only an approximation,
+    since the two arms' link geometry isn't identical -- re-plan with `--arm kuka --gripper
+    kuka` (or `planning/run_planning.sh EXP_NAME ASSEMBLY_NAME kuka`) for an exact result.
     """
     # Load the base URDF file for the KUKA robot
     base_robot_urdf_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'fabrica', 'urdf', 'fabrica_kuka.urdf')

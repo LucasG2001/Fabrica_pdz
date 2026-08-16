@@ -49,6 +49,8 @@ def interpolate_qs(arm_type, start_q, end_q, num_steps):
             bidirectional = i in [0, 2, 4, 6]
         elif arm_type == 'panda':
             bidirectional = False
+        elif arm_type == 'kuka':
+            bidirectional = False  # same as Panda: all 7 iiwa7 joints have finite (< 2pi) ranges
         elif arm_type == 'ur5e':
             bidirectional = i in [0, 1, 3, 4, 5]
         else:

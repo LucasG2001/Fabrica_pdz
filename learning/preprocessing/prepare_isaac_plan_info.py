@@ -50,7 +50,7 @@ def prepare_isaac_plan_info(log_dir, plan_info_path):
     with open(grasp_path, 'rb') as fp:
         grasps = pickle.load(fp)
     gripper_type, arm_type, has_ft_sensor = grasps['gripper'], grasps['arm'], grasps['ft_sensor']
-    assert gripper_type == 'panda' and arm_type == 'panda' and not has_ft_sensor['move'] and not has_ft_sensor['hold']
+    assert gripper_type == arm_type and gripper_type in ('panda', 'kuka') and not has_ft_sensor['move'] and not has_ft_sensor['hold']
     with open(tree_path, 'rb') as fp:
         tree = pickle.load(fp)
     assembly_center = get_assembly_center(arm_type)

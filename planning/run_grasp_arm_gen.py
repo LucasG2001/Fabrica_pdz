@@ -378,6 +378,16 @@ class GraspArmGenerator(GraspGenerator):
             assert 'left' in name or 'right' in name
             l2r_direction = grasp_info['l2r_direction'] if 'left' in name else -grasp_info['l2r_direction']
             if self.arm_type == 'panda': l2r_direction = -l2r_direction # TODO: fix bug for panda!
+            # NOTE: the panda flip above compensates for that specific finger.obj mesh's face-normal
+            # winding, not a general arm-type property. KUKA's left_finger.obj/right_finger.obj were
+            # independently converted from STL (see learning/preprocessing's mesh conversion), so
+            # their winding may or may not need the same flip -- not yet checked. Failure mode if
+            # wrong is self-limiting though: sample_points_with_normal_alignment() would sample the
+            # finger's back face instead of its gripping face, contact_points would end up empty
+            # (part_mesh.contains() would reject them), and the grasp candidate would just be
+            # discarded as infeasible rather than silently producing a bad grasp. If KUKA grasp
+            # generation is coming back with suspiciously few/no contact points, try adding
+            # `or self.arm_type == 'kuka'` here first.
             gripper_surface_points, _ = sample_points_with_normal_alignment(mesh, l2r_direction, n_sample)
             # trimesh.Scene([mesh, trimesh.PointCloud(gripper_surface_points, color=[255,0,0])]).show()
             # gripper_surface_points = mesh.sample(n_sample)
@@ -615,8 +625,8 @@ if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--assembly-dir', type=str, required=True, help='directory of assembly')
     parser.add_argument('--log-dir', type=str, required=True, help='directory to load precedence and save generated grasps')
-    parser.add_argument('--gripper', type=str, default='panda', choices=['panda', 'robotiq-85', 'robotiq-140'], help='gripper type')
-    parser.add_argument('--arm', type=str, default='panda')
+    parser.add_argument('--gripper', type=str, default='kuka', choices=['kuka', 'panda', 'robotiq-85', 'robotiq-140'], help='gripper type')
+    parser.add_argument('--arm', type=str, default='kuka')
     parser.add_argument('--ft-sensor', type=str, default='none', choices=['none', 'all', 'move', 'hold'], help='force torque sensor installed')
     parser.add_argument('--max-n-grasp', type=int, default=None, help='maximum number of grasps per part')
     parser.add_argument('--n-surface-pt', type=int, default=200, help='number of surface point samples for generating antipodal pairs')

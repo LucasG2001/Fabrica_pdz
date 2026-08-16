@@ -11,6 +11,10 @@ def get_move_arm_pos(arm_type):
         return np.array([14.5 * dx, 10 * dx, 0])
     elif arm_type == 'panda':
         return np.array([18 * dx, 8 * dx, 0])
+    elif arm_type == 'kuka':
+        # Placeholder: reuses Panda's board-grid layout (similar reach/footprint). Not yet
+        # re-tuned for the KUKA iiwa7 + Y-gripper's actual reach.
+        return np.array([18 * dx, 8 * dx, 0])
     elif arm_type == 'ur5e':
         return np.array([18 * dx, 10 * dx, 0])
     else:
@@ -22,6 +26,9 @@ def get_hold_arm_pos(arm_type):
     if arm_type == 'xarm7':
         return np.array([-14.5 * dx, 10 * dx, 0])
     elif arm_type == 'panda':
+        return np.array([-18 * dx, 8 * dx, 0])
+    elif arm_type == 'kuka':
+        # Placeholder: reuses Panda's board-grid layout. See get_move_arm_pos note.
         return np.array([-18 * dx, 8 * dx, 0])
     elif arm_type == 'ur5e':
         return np.array([-18 * dx, 10 * dx, 0])
@@ -77,6 +84,8 @@ def get_assembly_center(arm_type):
         return np.array([0, -6 * dx, 0])
     elif arm_type == 'panda':
         return np.array([0, -6 * dx, 0])
+    elif arm_type == 'kuka':
+        return np.array([0, -6 * dx, 0])
     elif arm_type == 'ur5e':
         return np.array([0, -6 * dx, 0])
     else:
@@ -88,6 +97,8 @@ def get_fixture_min_y(arm_type):
     if arm_type == 'xarm7':
         return 6 * dx
     elif arm_type == 'panda':
+        return 4 * dx
+    elif arm_type == 'kuka':
         return 4 * dx
     elif arm_type == 'ur5e':
         return 6 * dx

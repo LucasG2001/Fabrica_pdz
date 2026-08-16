@@ -58,7 +58,7 @@ def get_arm_shapes(arm_type, arm_meshes, mat_map):
                             mat = mat_map['limb']
                         else:
                             mat = mat_map['joint']
-                elif arm_type == 'panda' or arm_type == 'ur5e':
+                elif arm_type == 'panda' or arm_type == 'kuka' or arm_type == 'ur5e':
                     color = submesh.visual.material.diffuse / 255
                     color = color**3
                     mat = bbox.mat.PlasticMat(bbox.utils.Color.from_rgb(*color, saturation=1.0, value=4.0))
@@ -98,7 +98,7 @@ def get_gripper_shapes(gripper_type, gripper_meshes, has_ft_sensor, mat_map):
                             mat = mat_map['joint']
                         else:
                             mat = mat_map['hand']
-                    elif gripper_type == 'panda':
+                    elif gripper_type == 'panda' or gripper_type == 'kuka':
                         color = submesh.visual.material.diffuse / 255
                         color = color**3
                         mat = bbox.mat.PlasticMat(bbox.utils.Color.from_rgb(*color, saturation=1.0, value=4.0))

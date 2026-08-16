@@ -132,6 +132,17 @@ def get_panda_grasp_base_offset():
     return 10.34 + 0.9 # NOTE: extra 0.9 for finger tip
 
 
+def get_kuka_grasp_base_offset():
+    # Distance (cm) from the arm chain's dummy tip frame (kuka_link8, at the gripper mount
+    # point -- see assets/kuka/kuka.urdf) to the KUKA Y-gripper's calibrated TCP
+    # (gripper_tcp_joint offset in kuka_iiwa7_y_gripper.urdf = 0.1455m = 14.55cm; same value
+    # as learning's palm_to_finger_dist / kuka_fingertip_centered_joint). No extra fingertip
+    # fudge added (unlike Panda's "+0.9"): that offset already represents the hardware team's
+    # calibrated TCP, not a bare geometric midpoint. Not yet visually verified against real
+    # generated grasps.
+    return 14.55
+
+
 def get_robotiq_85_grasp_base_offset(open_ratio):
     return 3.5 + np.sin(0.9208 + (1 - open_ratio) * 0.8757) * 5.715 + 6.93075 + 0.9 # NOTE: extra 0.9 for finger tip
 
@@ -143,6 +154,8 @@ def get_robotiq_140_grasp_base_offset(open_ratio):
 def get_gripper_grasp_base_offset(gripper_type, open_ratio, delta=0.0):
     if gripper_type == 'panda':
         return get_panda_grasp_base_offset() + delta
+    elif gripper_type == 'kuka':
+        return get_kuka_grasp_base_offset() + delta
     elif gripper_type == 'robotiq-85':
         return get_robotiq_85_grasp_base_offset(open_ratio) + delta
     elif gripper_type == 'robotiq-140':
@@ -152,6 +165,17 @@ def get_gripper_grasp_base_offset(gripper_type, open_ratio, delta=0.0):
 
 
 def get_panda_basis_directions():
+    return [0, 0, -1], [0, 1, 0]
+
+
+def get_kuka_basis_directions():
+    # Same convention as Panda's: approach along -Z, closing (left-to-right finger) axis
+    # along +Y. Valid because assets/kuka/kuka.urdf's dummy tip frame (kuka_link8) and the
+    # full sim URDF's kuka_leftfinger/kuka_rightfinger joints were both deliberately built
+    # to mirror fabrica_franka.urdf's axis convention exactly (kuka_finger_joint1 axis
+    # "0 1 0", kuka_finger_joint2 axis "0 -1 0", same as panda_finger_joint1/2), and
+    # kuka_link8 -- like panda_joint8 -- carries no extra mount rotation. Not yet visually
+    # verified against real generated grasps.
     return [0, 0, -1], [0, 1, 0]
 
 
@@ -166,6 +190,8 @@ def get_robotiq_140_basis_directions():
 def get_gripper_basis_directions(gripper_type):
     if gripper_type == 'panda':
         return get_panda_basis_directions()
+    elif gripper_type == 'kuka':
+        return get_kuka_basis_directions()
     elif gripper_type == 'robotiq-85':
         return get_robotiq_85_basis_directions()
     elif gripper_type == 'robotiq-140':
@@ -175,6 +201,18 @@ def get_gripper_basis_directions(gripper_type):
 
 
 def get_panda_open_ratio(antipodal_points):
+    antipodal_points = np.array(antipodal_points, dtype=float)
+    antipodal_width = np.linalg.norm(antipodal_points[1] - antipodal_points[0])
+    open_ratio = antipodal_width / 8
+    if open_ratio > 1:
+        return None
+    else:
+        return open_ratio
+
+
+def get_kuka_open_ratio(antipodal_points):
+    # Same formula as Panda's: the KUKA Y-gripper's max opening width is also 8cm (2 x 0.04m
+    # per-finger stroke, matching Franka's 2 x 0.04m).
     antipodal_points = np.array(antipodal_points, dtype=float)
     antipodal_width = np.linalg.norm(antipodal_points[1] - antipodal_points[0])
     open_ratio = antipodal_width / 8
@@ -205,6 +243,8 @@ def get_robotiq_140_open_ratio(antipodal_points):
 def get_gripper_open_ratio(gripper_type, antipodal_points):
     if gripper_type == 'panda':
         return get_panda_open_ratio(antipodal_points)
+    elif gripper_type == 'kuka':
+        return get_kuka_open_ratio(antipodal_points)
     elif gripper_type == 'robotiq-85':
         return get_robotiq_85_open_ratio(antipodal_points)
     elif gripper_type == 'robotiq-140':
@@ -218,6 +258,15 @@ def get_panda_finger_states(open_ratio):
     return {
         'panda_leftfinger': [finger_open_extent],
         'panda_rightfinger': [finger_open_extent],
+    }
+
+
+def get_kuka_finger_states(open_ratio):
+    # Same formula as Panda's: each finger also strokes 0-4cm.
+    finger_open_extent = 4 * open_ratio
+    return {
+        'kuka_leftfinger': [finger_open_extent],
+        'kuka_rightfinger': [finger_open_extent],
     }
 
 
@@ -246,6 +295,8 @@ def get_robotiq_140_finger_states(open_ratio):
 def get_gripper_finger_states(gripper_type, open_ratio, suffix=None):
     if gripper_type == 'panda':
         finger_states = get_panda_finger_states(open_ratio)
+    elif gripper_type == 'kuka':
+        finger_states = get_kuka_finger_states(open_ratio)
     elif gripper_type == 'robotiq-85':
         finger_states = get_robotiq_85_finger_states(open_ratio)
     elif gripper_type == 'robotiq-140':
@@ -260,6 +311,8 @@ def get_gripper_finger_states(gripper_type, open_ratio, suffix=None):
 def get_gripper_base_name(gripper_type, suffix=None):
     if gripper_type == 'panda':
         name = 'panda_hand'
+    elif gripper_type == 'kuka':
+        name = 'kuka_hand'
     elif gripper_type in ['robotiq-85', 'robotiq-140']:
         name = 'robotiq_base'
     else:
@@ -272,6 +325,8 @@ def get_gripper_base_name(gripper_type, suffix=None):
 def get_gripper_hand_names(gripper_type, suffix=None):
     if gripper_type == 'panda':
         names = ['panda_hand']
+    elif gripper_type == 'kuka':
+        names = ['kuka_hand']
     elif gripper_type == 'robotiq-85':
         names = ['robotiq_base']
         for side_i in ['left', 'right']:
@@ -297,6 +352,8 @@ def get_gripper_hand_names(gripper_type, suffix=None):
 def get_gripper_knuckle_names(gripper_type, suffix=None): # NOTE: for avoiding grasping parts inside knuckles
     if gripper_type == 'panda':
         names = []
+    elif gripper_type == 'kuka':
+        names = []
     elif gripper_type == 'robotiq-85' or gripper_type == 'robotiq-140':
         names = []
         for side_i in ['left', 'right']:
@@ -313,6 +370,8 @@ def get_gripper_knuckle_names(gripper_type, suffix=None): # NOTE: for avoiding g
 def get_gripper_finger_names(gripper_type, suffix=None):
     if gripper_type == 'panda':
         names = ['panda_leftfinger', 'panda_rightfinger']
+    elif gripper_type == 'kuka':
+        names = ['kuka_leftfinger', 'kuka_rightfinger']
     elif gripper_type == 'robotiq-85':
         names = ['robotiq_left_inner_finger', 'robotiq_right_inner_finger']
     elif gripper_type == 'robotiq-140':
@@ -330,6 +389,17 @@ def load_panda_meshes(asset_folder, visual=False):
     meshes['panda_hand'] = trimesh.load(os.path.join(asset_folder, 'panda', dir_name, 'hand.obj'))
     meshes['panda_leftfinger'] = trimesh.load(os.path.join(asset_folder, 'panda', dir_name, 'finger.obj'))
     meshes['panda_rightfinger'] = trimesh.load(os.path.join(asset_folder, 'panda', dir_name, 'finger.obj'))
+    return meshes
+
+
+def load_kuka_meshes(asset_folder, visual=False):
+    # Unlike Panda (one mirrored finger.obj reused for both sides), the KUKA Y-gripper source
+    # has genuinely separate left/right finger meshes -- loaded as-is, no mirroring needed.
+    meshes = {}
+    dir_name = 'visual' if visual else 'collision'
+    meshes['kuka_hand'] = trimesh.load(os.path.join(asset_folder, 'kuka', dir_name, 'hand.obj'))
+    meshes['kuka_leftfinger'] = trimesh.load(os.path.join(asset_folder, 'kuka', dir_name, 'left_finger.obj'))
+    meshes['kuka_rightfinger'] = trimesh.load(os.path.join(asset_folder, 'kuka', dir_name, 'right_finger.obj'))
     return meshes
 
 
@@ -370,6 +440,8 @@ def load_ft_sensor_mesh():
 def load_gripper_meshes(gripper_type, asset_folder, has_ft_sensor=False, visual=False, combined=True):
     if gripper_type == 'panda':
         gripper_meshes = load_panda_meshes(asset_folder, visual=visual)
+    elif gripper_type == 'kuka':
+        gripper_meshes = load_kuka_meshes(asset_folder, visual=visual)
     elif gripper_type == 'robotiq-85':
         gripper_meshes =  load_robotiq_85_meshes(asset_folder, visual=visual)
     elif gripper_type == 'robotiq-140':
@@ -388,7 +460,20 @@ def get_panda_meshes_transforms(meshes, open_ratio):
 
     transforms['panda_leftfinger'] = get_translate_matrix([0, 4 * open_ratio, 5.84])
     transforms['panda_rightfinger'] = get_translate_matrix([0, -4 * open_ratio, 5.84]) @ get_scale_matrix([1, -1, 1])
-    
+
+    return transforms
+
+
+def get_kuka_meshes_transforms(meshes, open_ratio):
+    transforms = {k: np.eye(4) for k in meshes.keys()}
+
+    # No Z offset (unlike Panda's 5.84cm): kuka_finger_joint1/2 mount directly at kuka_hand's
+    # own origin (xyz="0 0 0" in fabrica_kuka.urdf / kuka_iiwa7_y_gripper.urdf). No mirroring
+    # scale matrix needed: left/right finger meshes are genuinely separate, not one mirrored
+    # mesh.
+    transforms['kuka_leftfinger'] = get_translate_matrix([0, 4 * open_ratio, 0])
+    transforms['kuka_rightfinger'] = get_translate_matrix([0, -4 * open_ratio, 0])
+
     return transforms
 
 
@@ -453,6 +538,8 @@ def get_ft_sensor_mesh_transform(gripper_type):
 def get_gripper_meshes_transforms(gripper_type, meshes, pos, quat, pose, open_ratio):
     if gripper_type == 'panda':
         transforms = get_panda_meshes_transforms(meshes, open_ratio)
+    elif gripper_type == 'kuka':
+        transforms = get_kuka_meshes_transforms(meshes, open_ratio)
     elif gripper_type == 'robotiq-85':
         transforms = get_robotiq_85_meshes_transforms(meshes, open_ratio)
     elif gripper_type == 'robotiq-140':
@@ -499,6 +586,15 @@ def load_arm_meshes(arm_type, asset_folder, visual=False, convex=True, combined=
         else:
             for i in range(0, 8):
                 meshes[f'panda_link{i}'] = trimesh.load(os.path.join(asset_folder, 'panda', 'collision', f'link{i}.obj'))
+    elif arm_type == 'kuka':
+        # kuka_link8 (assets/kuka/kuka.urdf's fixed dummy tip) has no mesh of its own -- same
+        # as Panda's link8 -- so only link0..7 are loaded here.
+        if visual:
+            for i in range(0, 8):
+                meshes[f'kuka_link{i}'] = trimesh.load(os.path.join(asset_folder, 'kuka', 'visual', f'link{i}.obj'))
+        else:
+            for i in range(0, 8):
+                meshes[f'kuka_link{i}'] = trimesh.load(os.path.join(asset_folder, 'kuka', 'collision', f'link{i}.obj'))
     elif arm_type == 'ur5e':
         linknames = ['base_link', 'shoulder_link', 'upper_arm_link', 'forearm_link', 'wrist_1_link', 'wrist_2_link', 'wrist_3_link']
         if visual:

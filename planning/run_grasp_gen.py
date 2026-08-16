@@ -263,7 +263,7 @@ if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--assembly-dir', type=str, required=True, help='directory of assembly')
     parser.add_argument('--log-dir', type=str, required=True, help='directory to load precedence and save generated grasps')
-    parser.add_argument('--gripper', type=str, default='panda', choices=['panda', 'robotiq-85', 'robotiq-140'], help='gripper type')
+    parser.add_argument('--gripper', type=str, default='kuka', choices=['kuka', 'panda', 'robotiq-85', 'robotiq-140'], help='gripper type')
     parser.add_argument('--ft-sensor', default=False, action='store_true', help='force torque sensor installed')
     parser.add_argument('--max-n-grasp', type=int, default=None, help='maximum number of grasps per part')
     parser.add_argument('--n-surface-pt', type=int, default=200, help='number of surface point samples for generating antipodal pairs')

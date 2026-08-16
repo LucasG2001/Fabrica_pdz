@@ -2,14 +2,18 @@
 
 EXP_NAME=$1
 ASSEMBLY=$2
-SETUP=${3:-panda}
+SETUP=${3:-kuka}
 ASSEMBLY_DIR=${4:-fabrica}
 
 ARM=""
 GRIPPER=""
 FT_SENSOR=""
 
-if [ "$SETUP" == "panda" ]; then
+if [ "$SETUP" == "kuka" ]; then
+  ARM="kuka"
+  GRIPPER="kuka"
+  FT_SENSOR="none"
+elif [ "$SETUP" == "panda" ]; then
   ARM="panda"
   GRIPPER="panda"
   FT_SENSOR="none"
@@ -26,7 +30,7 @@ elif [ "$SETUP" == "ur5e" ]; then
   GRIPPER="robotiq-85"
   FT_SENSOR="none"
 else
-  echo "Error: Unsupported SETUP value '$SETUP'. Please use 'panda' or 'xarm7' or 'ur5e'."
+  echo "Error: Unsupported SETUP value '$SETUP'. Please use 'kuka', 'panda', 'xarm7', or 'ur5e'."
   exit 1
 fi
 

@@ -26,17 +26,21 @@
 **Fabrica** is an autonomous robotic assembly system capable of planning and executing multi-step contact-rich assembly of general objects without human demonstrations.
 
 > **This fork targets a dual-arm KUKA LBR iiwa7 rig (with Y-gripper) as the primary robot**, in
-> place of upstream Fabrica's Franka Emika Panda. The simulated-training asset
-> (`learning/assets/fabrica/urdf/fabrica_kuka.urdf`), the Isaac Gym task/env code
-> (`learning/isaacgymenvs/tasks/fabrica/`), the asset-generation pipeline
-> (`learning/preprocessing/prepare_isaac.sh`), and the real-robot control stack
-> (`real_robot/`, via [kukapy](../franka_ros2_ws/src/kukapy)) all default to KUKA now. The one
-> remaining Panda-only piece is the upstream *grasp/sequence/motion planning* stage
-> (`planning/robot/util_arm.py`, `planning/robot/geometry.py`) — it has no native `'kuka'` arm
-> type yet, so newly-planned assemblies still use Panda kinematics/grasp geometry under the
-> hood (see the note under "Planning multi-part assembly processes" below). Franka/Panda
-> support elsewhere is left in place as a fallback (`generate_franka_urdf_from_plan.py`,
-> `fabrica_franka.urdf`) but is no longer the default path.
+> place of upstream Fabrica's Franka Emika Panda. The grasp/sequence/motion *planning* stage
+> (`planning/`, defaults to `kuka` in `planning/run_planning.sh`/`run_planning_batch.sh`), the
+> simulated-training asset (`learning/assets/fabrica/urdf/fabrica_kuka.urdf`), the Isaac Gym
+> task/env code (`learning/isaacgymenvs/tasks/fabrica/`), the asset-generation pipeline
+> (`learning/preprocessing/prepare_isaac.sh`), and the real-robot control stack (`real_robot/`,
+> via [kukapy](../franka_ros2_ws/src/kukapy)) all default to KUKA now. Franka/Panda support
+> elsewhere is left in place as a fallback (`--arm panda --gripper panda`,
+> `generate_franka_urdf_from_plan.py`, `fabrica_franka.urdf`) but is no longer the default
+> path. The `planning/` stage's KUKA grasp-basis-direction and grasp-base-offset geometry
+> (`planning/robot/geometry.py`'s `get_kuka_basis_directions()`/`get_kuka_grasp_base_offset()`)
+> is derived by construction (mirrors Panda's exact axis conventions, since fabrica_kuka.urdf's
+> finger-joint axes were deliberately built to match) and passes an FK/IK round-trip check, but
+> has **not been visually verified** against real generated grasps — check a rendered grasp
+> sequence before trusting it on hardware. Assemblies planned before this fork's KUKA support
+> was added still carry Panda-planned data; see "Planning multi-part assembly processes" below.
 
 ## 🔧 Installation
 
@@ -178,19 +182,22 @@ For parallel batch planning over multiple assemblies, run:
 bash ./planning/run_planning_batch.sh EXP_NAME
 ```
 
-Note: To modify the robot setup, refer to `planning/robot/workcell.py` and `planning/robot/geometry.py` to add your custom settings.
+By default (`SETUP` arg omitted, or `kuka`) this plans for the KUKA LBR iiwa7 + Y-gripper —
+`planning/robot/util_arm.py`'s `get_kuka_arm_chain()` (kinematic chain from `assets/kuka/kuka.urdf`,
+converted from the real rig's own `lbr_description`/`kuka_iiwa7_y_gripper` packages) and
+`planning/robot/geometry.py`'s KUKA grasp-basis/open-ratio/mesh functions. Pass `panda`,
+`panda-robotiq`, `xarm7`, or `ur5e` as the third argument (or `--arm`/`--gripper` directly on
+the individual `planning/run_*.py` scripts) to plan for a different arm instead. To modify the
+robot setup further, refer to `planning/robot/workcell.py` and `planning/robot/geometry.py`.
 
-> **Known gap:** this planning stage (grasp/sequence/motion planning, `planning/robot/util_arm.py`'s
-> `get_arm_chain()`) only has kinematic chains and grasp geometry for `'xarm7'`/`'panda'`/`'ur5e'` —
-> there is no native `'kuka'` arm type yet. `prepare_isaac_plan_info.py` asserts
-> `gripper_type == 'panda'` on the planned `grasps.pkl`, so assemblies planned today still use
-> Panda kinematics/grasp geometry at this stage; `learning/preprocessing/generate_kuka_urdf_from_plan.py`
-> then re-targets that Panda-planned data onto the KUKA arm via forward kinematics as an
-> approximation (see that script's docstring). Adding a real `'kuka'` entry here needs: a
-> planner-format URDF + collision/visual meshes under `assets/kuka/` (mirroring `assets/panda/`),
-> a `get_kuka_arm_chain()` in `util_arm.py`, workcell placement in `workcell.py`, and
-> KUKA-Y-gripper grasp-basis/open-ratio/mesh functions in `geometry.py` (mirroring the
-> `panda`-prefixed functions there). Not yet done in this fork.
+> **Note:** the KUKA grasp-basis-direction/grasp-base-offset geometry added for this fork
+> passes an FK/IK consistency check but has not been visually verified against real generated
+> grasps — see the fork-identity note at the top of this README. Assemblies planned before this
+> fork's KUKA support was added still carry Panda-planned `grasps.pkl` data; `prepare_isaac_plan_info.py`
+> accepts either `'panda'` or `'kuka'` (both arm and gripper type must match), and
+> `learning/preprocessing/generate_kuka_urdf_from_plan.py` re-targets old Panda-planned data
+> onto the KUKA arm via forward kinematics as an approximation (see that script's docstring) —
+> re-plan with `kuka` for an exact result.
 
 ### 2. Learning two-part assembly policies
 
