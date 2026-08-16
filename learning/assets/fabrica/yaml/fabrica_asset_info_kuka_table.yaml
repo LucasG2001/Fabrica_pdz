@@ -1,0 +1,7 @@
+kuka_hand_length: 0.0  # distance from origin of hand to origin of finger (fingers mount at the hand origin on the Y-gripper)
+kuka_finger_length: 0.1105  # distance from origin of finger to fingertip (Y-gripper finger link)
+kuka_gripper_width_max: 0.08  # maximum opening width of gripper (2 x 0.04m per-finger stroke, same as the Franka hand)
+
+table_depth: 1.28  # depth of table
+table_width: 0.91  # width of table
+table_height: 1.04  # height of table

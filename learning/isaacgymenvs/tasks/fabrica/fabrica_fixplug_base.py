@@ -33,8 +33,8 @@ class FabricaFixPlugBase(FabricaBase):
 
         table_asset = self.gym.create_box(
             self.sim,
-            self.asset_info_franka_table.table_depth,
-            self.asset_info_franka_table.table_width,
+            self.asset_info_kuka_table.table_depth,
+            self.asset_info_kuka_table.table_width,
             self.cfg_base.env.table_height,
             table_options,
         )
@@ -60,10 +60,10 @@ class FabricaFixPlugBase(FabricaBase):
             self.sim
         )  # shape = (num_envs * num_bodies, 3)
         _jacobian = self.gym.acquire_jacobian_tensor(
-            self.sim, "franka"
+            self.sim, "kuka"
         )  # shape = (num envs, num_bodies, 6, num_dofs)
         _mass_matrix = self.gym.acquire_mass_matrix_tensor(
-            self.sim, "franka"
+            self.sim, "kuka"
         )  # shape = (num_envs, num_dofs, num_dofs)
 
         self.root_state = gymtorch.wrap_tensor(_root_state)
@@ -111,7 +111,7 @@ class FabricaFixPlugBase(FabricaBase):
         self.arm_dof_vel = self.dof_vel[:, 0:7]
         self.arm_mass_matrix = self.mass_matrix[
             :, 0:7, 0:7
-        ]  # for Franka arm (not gripper)
+        ]  # for Kuka arm (not gripper)
 
         self.robot_base_pos = self.body_pos[:, self.robot_base_body_id_env, 0:3]
         self.robot_base_quat = self.body_quat[:, self.robot_base_body_id_env, 0:4]
@@ -218,7 +218,7 @@ class FabricaFixPlugBase(FabricaBase):
         )
 
     def _set_dof_pos_target(self):
-        """Set Franka DOF position target to move fingertips towards target pose."""
+        """Set Kuka DOF position target to move fingertips towards target pose."""
         self.ctrl_target_dof_pos = fcfix.compute_dof_pos_target(
             cfg_ctrl=self.cfg_ctrl,
             arm_dof_pos=self.arm_dof_pos,
@@ -230,10 +230,10 @@ class FabricaFixPlugBase(FabricaBase):
             device=self.device)
         self.gym.set_dof_position_target_tensor_indexed(self.sim,
                                                         gymtorch.unwrap_tensor(self.ctrl_target_dof_pos),
-                                                        gymtorch.unwrap_tensor(self.franka_actor_ids_sim),
-                                                        len(self.franka_actor_ids_sim))
+                                                        gymtorch.unwrap_tensor(self.kuka_actor_ids_sim),
+                                                        len(self.kuka_actor_ids_sim))
     def _set_dof_torque(self):
-        """Set Franka DOF torque to move fingertips towards target pose."""
+        """Set Kuka DOF torque to move fingertips towards target pose."""
         self.dof_torque = fcfix.compute_dof_torque(
             cfg_ctrl=self.cfg_ctrl,
             dof_vel=self.dof_vel,
@@ -251,5 +251,5 @@ class FabricaFixPlugBase(FabricaBase):
             device=self.device)
         self.gym.set_dof_actuation_force_tensor_indexed(self.sim,
                                                         gymtorch.unwrap_tensor(self.dof_torque),
-                                                        gymtorch.unwrap_tensor(self.franka_actor_ids_sim),
-                                                        len(self.franka_actor_ids_sim))
+                                                        gymtorch.unwrap_tensor(self.kuka_actor_ids_sim),
+                                                        len(self.kuka_actor_ids_sim))

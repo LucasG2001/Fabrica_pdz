@@ -118,7 +118,7 @@ class FabricaTaskAssemble(FabricaEnv, FactoryABCTask):
             if (part_plug, part_socket) not in plan_infos[assembly]:
                 raise ValueError(f'No assembly plan info found for {part_plug} and {part_socket} in assembly {assembly} (available: {plan_infos[assembly].keys()})')
             part_plan_info = plan_infos[assembly][(part_plug, part_socket)]
-            gripper_dof_pos = [self.asset_info_franka_table.franka_gripper_width_max * part_plan_info['open_ratio_plug']] * 2
+            gripper_dof_pos = [self.asset_info_kuka_table.kuka_gripper_width_max * part_plan_info['open_ratio_plug']] * 2
             arm_dof_pos_preassembly.append(np.concatenate([part_plan_info['arm_q_plug'][0], gripper_dof_pos]))
             arm_dof_pos_assembled.append(np.concatenate([part_plan_info['arm_q_plug'][1], gripper_dof_pos]))
             disassembly_path.append(part_plan_info['path'])
@@ -277,7 +277,7 @@ class FabricaTaskAssemble(FabricaEnv, FactoryABCTask):
     def reset_idx(self, env_ids):
         """Reset specified environments."""
 
-        self._reset_franka(env_ids)
+        self._reset_kuka(env_ids)
 
         if not ATTACH_PLUG_TO_GRIPPER:
             self.disable_gravity()
@@ -300,18 +300,18 @@ class FabricaTaskAssemble(FabricaEnv, FactoryABCTask):
 
         self.prev_delta_pos_observed[env_ids] = torch.zeros((len(env_ids), 3), device=self.device)
 
-    def _reset_franka(self, env_ids):
-        """Reset DOF states and DOF targets of Franka."""
+    def _reset_kuka(self, env_ids):
+        """Reset DOF states and DOF targets of Kuka."""
 
         # shape of dof_pos = (num_envs, num_dofs)
         # shape of dof_vel = (num_envs, num_dofs)
 
-        # Initialize Franka 
+        # Initialize Kuka 
         self.dof_pos[env_ids] = self.arm_dof_pos_preassembly[env_ids].clone().detach()
         self.dof_vel[env_ids] = 0.0  # shape = (num_envs, num_dofs)
         self.ctrl_target_dof_pos[env_ids] = self.arm_dof_pos_preassembly[env_ids].clone().detach()
 
-        multi_env_ids_int32 = self.franka_actor_ids_sim[env_ids].flatten()
+        multi_env_ids_int32 = self.kuka_actor_ids_sim[env_ids].flatten()
         self.gym.set_dof_state_tensor_indexed(self.sim,
                                               gymtorch.unwrap_tensor(self.dof_state),
                                               gymtorch.unwrap_tensor(multi_env_ids_int32),
@@ -320,8 +320,8 @@ class FabricaTaskAssemble(FabricaEnv, FactoryABCTask):
         # Set DOF torque
         self.gym.set_dof_actuation_force_tensor_indexed(self.sim,
                                                 gymtorch.unwrap_tensor(torch.zeros_like(self.dof_torque)),
-                                                gymtorch.unwrap_tensor(self.franka_actor_ids_sim),
-                                                len(self.franka_actor_ids_sim))
+                                                gymtorch.unwrap_tensor(self.kuka_actor_ids_sim),
+                                                len(self.kuka_actor_ids_sim))
 
         self.simulate_and_refresh()
 

@@ -1,3 +1,10 @@
+"""Ported from frankapy to kukapy (dual-KUKA-LBR rig) -- see
+real_robot/robot_interface.py's module docstring and
+franka_ros2_ws/src/kukapy/README.md for the full port rationale. Only the
+import and the `fa: FrankaArm` type hint changed; the adjustment logic
+itself (frame math, RigidTransform construction) is untouched, since none
+of it is frankapy-specific.
+"""
 import os
 import sys
 
@@ -11,7 +18,7 @@ import numpy as np
 
 from real_robot.robot_interface import RobotInterface
 from autolab_core import RigidTransform
-from frankapy import FrankaArm
+from kukapy import KukaArm
 
 
 def adjust_arm(robot, direction, amount=0.002, duration=1):
@@ -30,7 +37,7 @@ def adjust_arm(robot, direction, amount=0.002, duration=1):
     target_pose = RigidTransform(translation=new_translation, rotation=curr_pose.rotation, from_frame='franka_tool', to_frame='world')
 
     fa = robot.fa
-    fa: FrankaArm
+    fa: KukaArm
     fa.goto_pose(tool_pose=target_pose, duration=duration, use_impedance=False)
     robot.stop_skill()
     print(f"Target pose: {target_pose}")

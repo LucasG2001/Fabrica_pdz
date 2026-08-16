@@ -1,0 +1,13 @@
+plumbers_block:
+  0:
+    plug: '1'
+    socket: '3'
+  1:
+    plug: '4'
+    socket: '3'
+  2:
+    plug: '3'
+    socket: '2'
+  3:
+    plug: '0'
+    socket: '2'

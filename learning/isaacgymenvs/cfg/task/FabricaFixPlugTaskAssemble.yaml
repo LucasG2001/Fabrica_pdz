@@ -25,7 +25,7 @@ env:
     part_socket: null
 
     data_dir: tasks/fabrica/data/
-    palm_to_finger_dist: 0.1034 # distance from end-effector palm to midpoint between fingers
+    palm_to_finger_dist: 0.1455 # distance from end-effector palm to midpoint between fingers (KUKA Y-gripper's calibrated gripper_tcp offset)
 
     if_eval: False
     path_transform: True

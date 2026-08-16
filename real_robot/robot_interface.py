@@ -1,16 +1,52 @@
+"""Real-robot interface for Fabrica, targeting the dual-KUKA-LBR rig via
+kukapy (franka_ros2_ws/src/kukapy) instead of the original Franka
+Emika Panda + frankapy setup.
+
+Porting notes (see kukapy's README.md for the full frankapy -> kukapy
+method-mapping table, frame conventions, and known gaps):
+  - `FrankaArm`/`FrankaConstants` -> `KukaArm`/`KukaConstants`. `robot_num`
+    keeps its original meaning (1 = "left"/holder arm, 2 = "right"/inserter
+    arm), now mapped onto lbr_one/lbr_two.
+  - `init_joint_pose_publisher()`/`init_rl_publisher()`: frankapy's manual
+    `rospy.Publisher(SensorDataGroup)` setup is gone -- `goto_joints(dynamic=True)`
+    /`goto_pose(dynamic=True)` open the equivalent streaming session
+    internally.
+  - `publish_traj()`/`send_control_targets()`: the hand-rolled protobuf
+    (`JointPositionSensorMessage`/`PosePositionSensorMessage`/
+    `CartesianImpedanceSensorMessage`) + `make_sensor_group_msg()` +
+    `rospy` publish is replaced by `self.fa.publish_streaming_joints(...)`
+    / `self.fa.publish_streaming_pose(...)`.
+  - `rospy.Rate`/`rospy.get_time()` -> plain `time.sleep()`/`time.time()`:
+    `KukaArm` owns its own rclpy node/context internally, so this file no
+    longer needs to talk to ROS directly.
+  - `get_tool_jacobian()`/`calculate_tool_velocity()` are NOT currently
+    usable: `KukaArm.get_jacobian()` raises `NotImplementedError` (no
+    verified Jacobian source in this workspace -- see kukapy's README.md).
+    Neither has a caller in this file today.
+  - Requires the dual-arm rig to be brought up with
+    `lbr_dual_arm_bringup/launch/cartesian_impedance.launch.py`, and the
+    `franka_ros2_ws` ROS2 workspace to be sourced before running any
+    `real_robot/*.py` script (see main README.md's "Install kukapy for
+    real-robot experiments" section).
+"""
 import os
 import sys
 
 project_base_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 sys.path.append(project_base_dir)
 
-from frankapy import FrankaArm
-from frankapy import FrankaConstants as FC
-from frankapy import FrankaArm, SensorDataMessageType
+try:
+    from kukapy import KukaArm
+    from kukapy import KukaConstants as KC
+except ImportError as exc:
+    raise ImportError(
+        "Could not import kukapy. Source the franka_ros2_ws ROS2 workspace before "
+        "running real-robot scripts, e.g.:\n"
+        "  source /opt/ros/<distro>/setup.bash\n"
+        "  source ~/franka_ros2_ws/install/setup.bash\n"
+        "See franka_ros2_ws/src/kukapy/README.md for details."
+    ) from exc
 
-from franka_interface_msgs.msg import SensorDataGroup
-from frankapy.proto_utils import sensor_proto2ros_msg, make_sensor_group_msg
-from frankapy.proto import JointPositionSensorMessage, ShouldTerminateSensorMessage, PosePositionSensorMessage, CartesianImpedanceSensorMessage
 from autolab_core import RigidTransform
 from isaacgym import torch_utils
 import isaacgymenvs
@@ -18,7 +54,6 @@ from isaacgymenvs.learning import common_player
 from real_robot.algo_utils import closest_point_on_path, do_deltapos_path_transform, undo_deltapos_path_transform
 
 import time
-import rospy
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 import yaml
@@ -46,7 +81,7 @@ def load_config():
 
 
 def load_rl_policy(checkpoint_path, device='cuda'):
-    
+
     # Load config used in training
     config_path = os.path.join(os.path.dirname(checkpoint_path), '..', 'config.yaml')
     with open(config_path, "r") as f:
@@ -95,20 +130,28 @@ class RobotInterface:
 
     def __init__(self, robot_num, residual=False):
         self.robot_num = robot_num
-        self.fa = FrankaArm(with_gripper=True, robot_num=robot_num)
+        self.fa = KukaArm(with_gripper=True, robot_num=robot_num)
         self.device = 'cuda'
 
-        self.joint_limits_min = np.array([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973])
-        self.joint_limits_max = np.array([2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973])
+        self.joint_limits_min = KC.JOINT_LIMITS_MIN
+        self.joint_limits_max = KC.JOINT_LIMITS_MAX
 
         self.tool_to_base = RigidTransform(
-            translation=[0,0,0.1034], 
-            rotation=[[0.7071, 0.7071, 0], [-0.7071, 0.7071, 0], [0, 0, 1]], 
-            from_frame="franka_tool", 
+            # Translation updated to the KUKA Y-gripper's calibrated gripper_tcp offset
+            # (0.1455m, from kuka_iiwa7_y_gripper.urdf's gripper_tcp_joint -- same source used
+            # for fabrica_kuka.urdf's kuka_fingertip_centered_joint and the sim's
+            # palm_to_finger_dist). Rotation is UNCHANGED from the original Franka port (a
+            # 45-degree yaw matching panda_hand's frame convention) -- NOT verified against the
+            # KUKA Y-gripper's actual mount rotation. Frame name strings are intentionally left
+            # as "franka_tool"/"franka_tool_base": kukapy's get_pose()/goto_pose() use those
+            # exact strings for drop-in compatibility (see kukapy README's "Frame conventions").
+            translation=[0,0,0.1455],
+            rotation=[[0.7071, 0.7071, 0], [-0.7071, 0.7071, 0], [0, 0, 1]],
+            from_frame="franka_tool",
             to_frame="franka_tool_base")
 
         self.residual = residual
-    
+
     def reset_arm(self, home_gripper=True):
         self.fa.goto_gripper(0.08, grasp=False)
         self.fa.reset_joints()
@@ -121,41 +164,19 @@ class RobotInterface:
         if norm > 1e-3:
             print(f"[WARNING]: Clipped joints, norm: {norm}")
         return d
-    
-    def init_joint_pose_publisher(self, T, init_joints):
-        if self.robot_num != 1:
-            topic_name = FC.ALTERNATIVE_SENSOR_PUBLISHER_TOPIC
-        else:
-            topic_name = FC.DEFAULT_SENSOR_PUBLISHER_TOPIC
-        self.pub = rospy.Publisher(topic_name, SensorDataGroup, queue_size=100)
-        rospy.loginfo(f'Init pose trajectory for robot {self.robot_num} for {T}s...')
-        self.msg_id = 0
-        self.init_time = rospy.Time.now().to_time()
 
+    def init_joint_pose_publisher(self, T, init_joints):
         self.fa.goto_joints(self.clip_joints(init_joints),
-                 duration=T, 
-                 dynamic=True, 
+                 duration=T,
+                 dynamic=True,
                  buffer_time=10,
                  use_impedance=True,
                  ignore_virtual_walls=True,
                  ignore_errors=True,
-                 joint_impedances=FC.DEFAULT_JOINT_IMPEDANCES,
-                 k_gains=[500.0, 500.0, 500.0, 400.0, 180.0, 80.0, 40.0],
-                 d_gains=[50.0, 50.0, 50.0, 40.0, 20.0, 15.0, 10.0]
         )
 
     def init_rl_publisher(self, real_config):
         T = real_config['control']['duration']
-
-        if self.robot_num != 1:
-            topic_name = FC.ALTERNATIVE_SENSOR_PUBLISHER_TOPIC
-        else:
-            topic_name = FC.DEFAULT_SENSOR_PUBLISHER_TOPIC
-        self.pub = rospy.Publisher(topic_name, SensorDataGroup, queue_size=1000)
-        rospy.loginfo(f'Init pose trajectory for robot {self.robot_num} for {T}s...')
-        self.msg_id = 0
-        self.init_time = rospy.Time.now().to_time()
-
         self.fa.goto_pose(
             tool_pose=self.fa.get_pose(),
             duration=T,
@@ -168,49 +189,33 @@ class RobotInterface:
         )
 
     def publish_traj(self, joint_pose, dt):
-        timestamp = rospy.Time.now().to_time() - self.init_time
-        traj_gen_proto_msg = JointPositionSensorMessage(
-            id=self.msg_id, 
-            timestamp=timestamp,
-            joints=self.clip_joints(joint_pose)
-		)
-        ros_msg = make_sensor_group_msg(
-            trajectory_generator_sensor_msg=sensor_proto2ros_msg(
-                traj_gen_proto_msg, 
-                SensorDataMessageType.JOINT_POSITION),
-            )
-
-        self.pub.publish(ros_msg)
-        self.msg_id += 1
+        self.fa.publish_streaming_joints(self.clip_joints(joint_pose))
         time.sleep(dt)
-    
+
     def goto_gripper(self, width, block=True, grasp=False, grasp_force=60):
-        width_clipped = FC.GRIPPER_WIDTH_MIN + width * (FC.GRIPPER_WIDTH_MAX - FC.GRIPPER_WIDTH_MIN)
+        width_clipped = KC.GRIPPER_WIDTH_MIN + width * (KC.GRIPPER_WIDTH_MAX - KC.GRIPPER_WIDTH_MIN)
         self.fa.goto_gripper(
-                     width_clipped, 
-                     grasp=grasp, 
-                     speed=0.01, 
+                     width_clipped,
+                     grasp=grasp,
+                     speed=0.01,
                      force=grasp_force if grasp else 10,
                      epsilon_inner=0.08,
-                     epsilon_outer=0.08, 
-                     block=block, 
-                     ignore_errors=True, 
+                     epsilon_outer=0.08,
+                     block=block,
+                     ignore_errors=True,
                      skill_desc='GoToGripper')
-        
+
     def goto_joints(self, joints, duration=5, ignore_virtual_walls=False):
         joints_clipped = self.clip_joints(joints)
         self.fa.goto_joints(
             joints_clipped,
             duration=duration,
-            ignore_virtual_walls=ignore_virtual_walls,
-            joint_impedances=FC.DEFAULT_JOINT_IMPEDANCES,
-            k_gains=[500.0, 500.0, 500.0, 400.0, 180.0, 80.0, 40.0],
-            d_gains=[50.0, 50.0, 50.0, 40.0, 20.0, 15.0, 10.0])
-    
+            ignore_virtual_walls=ignore_virtual_walls)
+
     def stop_skill(self):
         if not self.fa.is_skill_done():
             self.fa.stop_skill()
-    
+
     def guide_mode(self, duration, block=False, print_pose=False, translation_only=False):
         start_t = time.time()
         if translation_only:
@@ -226,7 +231,7 @@ class RobotInterface:
 
     def calculate_tool_pose(self, joints):
         return self.fa.get_links_transforms(joints, use_rigid_transforms=True)[-2] * self.tool_to_base
-    
+
     def get_tool_jacobian(self, joints):
 
         # Get the Jacobian of the end-effector (before tool attachment)
@@ -252,14 +257,14 @@ class RobotInterface:
         # Adjust the end-effector Jacobian to the tool frame
         tool_jacobian = adj_T @ J_ee
         return tool_jacobian
-    
+
     def calculate_tool_velocity(self, joints):
         J_tool = self.get_tool_jacobian(joints)
         joint_velocities = self.fa.get_joint_velocities()
         return np.dot(J_tool, joint_velocities)
-    
+
     def send_control_targets(self, pose_curr, actions, real_config, disassembly_path=None):
-        """Sends pose targets to franka-interface via frankapy."""
+        """Sends pose targets to the running Cartesian-impedance controller via kukapy."""
         # NOTE: All actions are assumed to be in the form of [delta_position; delta_orientation],
         # where delta position is in the robot base frame, delta orientation is in the end-effector
         # frame, and delta orientation is an Euler vector (i.e., 3-element axis-angle
@@ -293,7 +298,7 @@ class RobotInterface:
                 self._prev_targ_pos = curr_pos.copy()
             if self._prev_targ_ori_mat is None:
                 self._prev_targ_ori_mat = curr_ori_mat.copy()
-            
+
             targ_pos = self._prev_targ_pos + actions[:3]
             targ_ori_mat = R.from_rotvec(actions[3:6]).as_matrix() @ self._prev_targ_ori_mat
 
@@ -314,35 +319,16 @@ class RobotInterface:
 
             self._prev_targ_pos = targ_pos.copy()
             self._prev_targ_ori_mat = targ_ori_mat.copy()
-        
+
         else:
             raise Exception(f"Invalid control mode")
 
-        targ_ori_quat=np.roll(
-            R.from_matrix(targ_ori_mat).as_quat(), shift=1
-        )  # (w, x, y, z)
+        targ_pose = RigidTransform(
+            translation=targ_pos, rotation=targ_ori_mat,
+            from_frame=pose_curr.from_frame, to_frame=pose_curr.to_frame,
+        )
 
-        timestamp = rospy.Time.now().to_time() - self.init_time
-        proto_msg_pose = PosePositionSensorMessage(
-            id=self.msg_id, timestamp=timestamp, position=targ_pos, quaternion=targ_ori_quat,
-        )
-        proto_msg_impedance = CartesianImpedanceSensorMessage(
-            id=self.msg_id,
-            timestamp=timestamp,
-            translational_stiffnesses=prop_gains[:3],
-            rotational_stiffnesses=prop_gains[3:6],
-        )
-        ros_msg = make_sensor_group_msg(
-            trajectory_generator_sensor_msg=sensor_proto2ros_msg(
-                sensor_proto_msg=proto_msg_pose, sensor_data_type=SensorDataMessageType.POSE_POSITION,
-            ),
-            feedback_controller_sensor_msg=sensor_proto2ros_msg(
-                sensor_proto_msg=proto_msg_impedance,
-                sensor_data_type=SensorDataMessageType.CARTESIAN_IMPEDANCE,
-            )
-        )
-        self.pub.publish(ros_msg)
-        self.msg_id += 1
+        self.fa.publish_streaming_pose(targ_pose)
 
     def get_pose_error(self, pose_curr, pose_goal):
         curr_pos, curr_ori_mat = pose_curr.translation, pose_curr.rotation
@@ -352,7 +338,7 @@ class RobotInterface:
             R.from_matrix(targ_ori_mat) * R.from_matrix(curr_ori_mat).inv()
         ).magnitude()
         return pos_err, ori_err_rad
-    
+
     def get_rl_obs(self, pose_curr, pose_goal, disassembly_path=None):
         delta_pos = pose_goal.translation - pose_curr.translation
         if disassembly_path is not None:
@@ -362,7 +348,7 @@ class RobotInterface:
         obs = delta_pos
         obs = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
         return obs
-    
+
     def pose_world_to_robot_base(self, pos, quat):
         """Convert pose from world frame to robot base frame."""
         robot_base_pos = torch.tensor([[0.4540, 0.1975, 0.3950]], dtype=torch.float32, device=self.device)
@@ -374,7 +360,7 @@ class RobotInterface:
             robot_base_transform_inv[0], robot_base_transform_inv[1], quat, pos
         )
         return pos_in_robot_base, quat_in_robot_base
-    
+
     def get_rl_action(self, policy, real_config, obs, residual_action=None, disassembly_path=None):
 
         control_mode = real_config['control']['mode']['type']
@@ -399,15 +385,15 @@ class RobotInterface:
                 residual_action_norm = np.linalg.norm(residual_action)
             residual_action /= residual_action_norm
             action += residual_action
-        
+
         action *= np.array(pos_action_scale)
         return action
 
     def execute_rl_policy(self, policy, real_config, goal_joints, global_pos_shift=np.zeros(3)):
         assert self.robot_num == 2
 
-        rate_ctrl = rospy.Rate(real_config['control']['freq'])
         duration = real_config['control']['duration']
+        dt = 1.0 / real_config['control']['freq']
 
         curr_joints = self.fa.get_joints()
         pose_goal = self.calculate_tool_pose(goal_joints)
@@ -421,7 +407,7 @@ class RobotInterface:
         self._prev_targ_ori_mat = None
 
         pos_err = None
-        t_start = rospy.get_time()
+        t_start = time.time()
         n_step = 0
 
         obs_noise = (2 * torch.rand(3).to(self.device) - 1) * 0.003
@@ -433,7 +419,7 @@ class RobotInterface:
         success = False
 
         try:
-            while rospy.get_time() - t_start < duration:
+            while time.time() - t_start < duration:
 
                 key = get_key_nonblocking()
                 if key == 'q':
@@ -469,13 +455,13 @@ class RobotInterface:
                     print("Near goal, early termination")
                     success = True
                     break
-                
-                rate_ctrl.sleep()
+
+                time.sleep(dt)
                 n_step += 1
 
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        
+
         print(f'RL policy execution finished (pos err: {pos_err})')
         self.stop_skill()
 
@@ -495,8 +481,8 @@ class RobotInterface:
     def execute_openloop_policy(self, real_config, goal_joints):
         assert self.robot_num == 2
 
-        rate_ctrl = rospy.Rate(real_config['control']['freq'])
         duration = real_config['control']['duration']
+        dt = 1.0 / real_config['control']['freq']
 
         curr_joints = self.fa.get_joints()
         pose_goal = self.calculate_tool_pose(goal_joints)
@@ -509,17 +495,17 @@ class RobotInterface:
         self._prev_targ_ori_mat = None
 
         pos_err = None
-        t_start = rospy.get_time()
+        t_start = time.time()
 
         success = False
 
         try:
-            while rospy.get_time() - t_start < duration:
+            while time.time() - t_start < duration:
 
                 pose_curr = self.calculate_tool_pose(self.fa.get_joints())
 
                 obs = self.get_rl_obs(pose_curr, pose_goal, disassembly_path) # only needed for success detection
-                
+
                 action = self.get_openloop_action(real_config, pose_curr, pose_goal)
                 action = np.concatenate([action, np.zeros(3)]) # zero delta orientation
 
@@ -531,12 +517,12 @@ class RobotInterface:
                     print("Near goal, early termination")
                     success = True
                     break
-                
-                rate_ctrl.sleep()
-        
+
+                time.sleep(dt)
+
         except KeyboardInterrupt:
             print('Early stopped')
-        
+
         print(f'Openloop policy execution finished (pos err: {pos_err})')
         self.stop_skill()
 

@@ -13,7 +13,7 @@ def compute_dof_pos_target(cfg_ctrl,
                            ctrl_target_fingertip_midpoint_pos,
                            ctrl_target_fingertip_midpoint_quat,
                            device):
-    """Compute Franka DOF position target to move fingertips towards target pose."""
+    """Compute Kuka DOF position target to move fingertips towards target pose."""
 
     ctrl_target_dof_pos = torch.zeros((cfg_ctrl['num_envs'], 9), device=device)
 
@@ -50,7 +50,7 @@ def compute_dof_torque(cfg_ctrl,
                        ctrl_target_fingertip_midpoint_quat,
                        ctrl_target_fingertip_contact_wrench,
                        device):
-    """Compute Franka DOF torque to move fingertips towards target pose."""
+    """Compute Kuka DOF torque to move fingertips towards target pose."""
     # References:
     # 1) https://ethz.ch/content/dam/ethz/special-interest/mavt/robotics-n-intelligent-systems/rsl-dam/documents/RobotDynamics2018/RD_HS2018script.pdf
     # 2) Modern Robotics
