@@ -136,10 +136,22 @@ def get_kuka_grasp_base_offset():
     # Distance (cm) from the arm chain's dummy tip frame (kuka_link8, at the gripper mount
     # point -- see assets/kuka/kuka.urdf) to the KUKA Y-gripper's calibrated TCP
     # (gripper_tcp_joint offset in kuka_iiwa7_y_gripper.urdf = 0.1455m = 14.55cm; same value
-    # as learning's palm_to_finger_dist / kuka_fingertip_centered_joint). No extra fingertip
-    # fudge added (unlike Panda's "+0.9"): that offset already represents the hardware team's
-    # calibrated TCP, not a bare geometric midpoint. Not yet visually verified against real
-    # generated grasps.
+    # as learning's palm_to_finger_dist / kuka_fingertip_centered_joint).
+    #
+    # STILL BROKEN (2026-08-17), do not trust this number: by the same logic that makes Panda's
+    # offset (11.24) work -- it lands almost exactly on the panda finger mesh's post-transform
+    # z-tip (11.23), comfortably clear of panda_hand's own z-max (6.6) -- 14.55 should land near
+    # KUKA's finger tip too (kuka_leftfinger/rightfinger local z max = 15.05, within 0.5cm). But
+    # unlike Panda (verified: 150/150 candidates get contact, only 33/150 = 22% self-collide),
+    # KUKA at offset=14.55 gets ZERO contact (0/150), and no value tried in [7.3, 14.55] gets
+    # both nonzero contact AND zero self-collision -- lowering the offset enough to reach the
+    # object with the fingers instead makes kuka_hand (the palm/motor-housing mesh) collide with
+    # the part (visually confirmed via render: the part overlaps the housing body, not the
+    # finger prongs). This isn't a scalar-offset problem like Panda's; something about the
+    # kuka_hand/finger mesh assembly's frame is likely off in a way a single constant can't fix
+    # (candidate: a missing rotation on the merged kuka_hand mesh, analogous to the 180deg-
+    # about-Z twist get_kuka_basis_directions() already needed). Not yet root-caused -- flagged
+    # for further investigation with the same visual-debug technique used to find this.
     return 14.55
 
 
