@@ -219,8 +219,7 @@ python planning/utils/debug_grasp_headless.py \
   --log-dir logs/EXP_NAME/ASSEMBLY_NAME \
   --arm kuka --gripper kuka \
   --part-id PART_ID \
-  --failure-mode ground-collision \
-  --out-dir /tmp/fabrica_grasp_debug
+  --failure-mode ground-collision
 ```
 
 Requires `logs/EXP_NAME/ASSEMBLY_NAME/precedence.pkl` to already exist (i.e. run
@@ -235,10 +234,44 @@ Requires `logs/EXP_NAME/ASSEMBLY_NAME/precedence.pkl` to already exist (i.e. run
 - `success` — first candidate that passes the full `check_grasp_feasible` check (move **or**
   hold), to sanity-check what a working grasp looks like, arm included
 
+Renders are written as PNGs under **`logs/EXP_NAME/ASSEMBLY_NAME/grasp_debug/`** by default
+(`<log-dir>/grasp_debug`) — colocated with that experiment's `grasps.pkl`/`grasp_stats.txt`
+rather than `/tmp`, so they survive a reboot and stay next to the run they're debugging. Override
+with `--out-dir SOME_DIR` if you want them elsewhere. Filenames encode the arm, gripper, part, and
+failure mode, e.g. `kuka_kuka_part0_ground-collision_iso.png`; re-running the same command
+overwrites that mode's previous render rather than accumulating files. These renders are debug
+scratch output, not experiment results — `logs/` isn't gitignored in this repo (nothing under it
+is committed by convention, but nothing stops you from doing so for a specific PNG worth keeping
+around, e.g. attaching it to an issue/PR).
+
 Other useful flags: `--motion-type move|hold` picks which arm chain/base placement to solve IK
 for (only affects non-`success` modes — `success` shows whichever of move/hold actually passed,
 noting if that differs from what you asked for); `--no-arm` skips the IK solve and arm render
 entirely (gripper + part only, faster if you don't need the robot in frame).
+
+#### Rendering two robot arms side by side (headless, no display needed)
+
+`planning/utils/render_dual_robot.py` renders two robot arms at rest pose next to each other —
+e.g. to sanity-check a new arm's scale/reach against a known-good one, or just to see what an arm
++ gripper combo looks like without running any planning first. Same headless `trimesh` offscreen
+renderer as the grasp debugger above (they share its `fit_camera()` helper), no assembly or
+`precedence.pkl` needed:
+
+```bash
+python planning/utils/render_dual_robot.py \
+  --arm1 kuka --arm2 panda \
+  --out-dir output/dual_robot
+```
+
+Writes `iso`, `front`, `side`, and `top` views as `{arm1}_{arm2}_{view}.png`. `--arm1`/`--arm2`
+accept `kuka`, `panda`, `xarm7`, or `ur5e` (mix and match); `--no-gripper` renders arm links only;
+`--spacing` sets the distance (cm) between the two robot bases; `--open-ratio` sets the shown
+gripper opening (kuka/panda only — `xarm7`/`ur5e` have no gripper mesh wired up here). The
+script's own default `--out-dir` is `/tmp/fabrica_dual_robot`, but reference renders worth keeping
+around (e.g. after a URDF/mesh change, to eyeball that nothing broke) are checked into this repo
+under **`output/dual_robot/`** — unlike `logs/`, `output/` renders are meant to be committed:
+regenerate with the command above (pointed at `output/dual_robot`) and commit the resulting PNGs
+alongside whatever code change prompted the re-render.
 
 For grasps that already made it into `grasps.pkl` (i.e. you want to inspect a *successful* grasp,
 or a saved move/hold pair), use the existing `planning/utils/visualize_grasps.py` /

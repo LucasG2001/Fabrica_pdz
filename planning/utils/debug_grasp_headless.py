@@ -161,6 +161,12 @@ def debug_grasp(assembly_dir, log_dir, arm, gripper, part_id, failure_mode, out_
                  reduced_limit=0.1, seed=0, motion_type='move', show_arm=True):
     asset_folder = os.path.join(project_base_dir, 'assets')
 
+    if out_dir is None:
+        # colocate with the rest of this experiment's planning outputs (grasps.pkl,
+        # grasp_stats.txt, ...) instead of /tmp, so renders survive a reboot and stay next to
+        # the run they're debugging
+        out_dir = os.path.join(log_dir, 'grasp_debug')
+
     with open(os.path.join(log_dir, 'precedence.pkl'), 'rb') as fp:
         G_preced = pickle.load(fp)
 
@@ -241,7 +247,7 @@ if __name__ == '__main__':
                          help='which check to find a matching candidate for: ground-collision, self-collision (gripper hits the part it is grasping), zero-contact (no sampled contact points), success (passes full check_grasp_feasible)')
     parser.add_argument('--motion-type', type=str, default='move', choices=['move', 'hold'], help='which arm chain (and base placement) to solve IK for')
     parser.add_argument('--no-arm', dest='show_arm', action='store_false', help='skip the arm IK + render (gripper + part only, faster)')
-    parser.add_argument('--out-dir', type=str, default='/tmp/fabrica_grasp_debug', help='directory to write rendered PNGs to')
+    parser.add_argument('--out-dir', type=str, default=None, help='directory to write rendered PNGs to (default: <log-dir>/grasp_debug)')
     parser.add_argument('--seed', type=int, default=0)
     args = parser.parse_args()
 
