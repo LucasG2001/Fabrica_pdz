@@ -170,12 +170,13 @@ def get_panda_basis_directions():
 
 def get_kuka_basis_directions():
     # Same convention as Panda's: approach along -Z, closing (left-to-right finger) axis
-    # along +Y. Valid because assets/kuka/kuka.urdf's dummy tip frame (kuka_link8) and the
-    # full sim URDF's kuka_leftfinger/kuka_rightfinger joints were both deliberately built
-    # to mirror fabrica_franka.urdf's axis convention exactly (kuka_finger_joint1 axis
-    # "0 1 0", kuka_finger_joint2 axis "0 -1 0", same as panda_finger_joint1/2), and
-    # kuka_link8 -- like panda_joint8 -- carries no extra mount rotation. Not yet visually
-    # verified against real generated grasps.
+    # along +Y. Valid because assets/kuka/kuka.urdf's kuka_joint8 now includes the KUKA
+    # Y-gripper's real 180deg-about-Z mount rotation (matching the hardware-canonical
+    # gripper_mount_joint and fabrica_kuka.urdf's kuka_hand_joint), so kuka_link8's frame
+    # matches the gripper_base_link frame the hand/finger meshes and finger-joint axes
+    # (kuka_finger_joint1 "0 1 0", kuka_finger_joint2 "0 -1 0") are actually authored in --
+    # unlike a bare Z rotation would otherwise flip the +Y closing axis to -Y. Since Rz(180)
+    # leaves the Z axis fixed, the approach direction is unaffected either way.
     return [0, 0, -1], [0, 1, 0]
 
 

@@ -3,15 +3,24 @@
 KUKA LBR iiwa7 arm-only kinematic chain for the planning/ stage's IK/collision
 pipeline (planning/robot/util_arm.py, geometry.py). Mirrors assets/panda/panda.urdf's
 convention: 7 revolute joints plus one fixed dummy tip link (kuka_link8) at the
-gripper mount point, translation only, no mount rotation; the actual gripper's
-orientation/closing-axis convention is applied separately via
-get_gripper_basis_directions('kuka') in planning/robot/geometry.py, exactly like
-panda_joint8 in assets/panda/panda.urdf omits panda_hand_joint's -45deg twist.
+gripper mount point. Unlike panda_joint8 (which can validly omit panda_hand_joint's
+-45deg twist, since the planning-stage panda_hand/finger meshes are themselves
+authored in the untwisted frame), kuka_link8 DOES carry the KUKA Y-gripper's mount
+rotation: the hardware-canonical gripper_mount_joint below is a real 180deg-about-Z
+physical mount, not just a mesh-alignment artifact, and assets/kuka/{visual,collision}
+gripper meshes are exported in that rotated (gripper_base_link) frame. Dropping it
+here left get_kuka_basis_directions()'s closing axis pointing 180deg off from the
+meshes' real local +Y, and because the KUKA hand mesh's center of mass is offset
+~2.7cm off-axis in X (not rotationally symmetric under 180deg about its own Z), this
+showed up as a constant rendered offset between the gripper body and the grasped
+part; fixed by including the same 180deg twist here that fabrica_kuka.urdf's
+kuka_hand_joint already carries.
 
 Joint origins/limits ported from the hardware-canonical description at
 ~/Grasp_Planning/assets/urdf/kuka_iiwa7_y_gripper/urdf/kuka_iiwa7_y_gripper.urdf
 (same source as learning/assets/fabrica/urdf/fabrica_kuka.urdf). kuka_link8's
-offset (0.0308m) matches that URDF's gripper_mount_joint translation.
+offset (0.0308m, now with the matching 180deg Z rotation) matches that URDF's
+gripper_mount_joint transform exactly.
 
 Meshes converted from the real dual-arm rig's iiwa7 description package
 (~/franka_ros2_ws/src/lbr_fri_ros2_stack/lbr_description/meshes/iiwa7/{visual,collision}),
@@ -213,7 +222,7 @@ being authored in assembled/candle-pose coordinates).
     </inertial>
   </link>
   <joint name="kuka_joint8" type="fixed">
-    <origin rpy="0 0 0" xyz="0 0 0.0308"/>
+    <origin rpy="0 0 3.14159265" xyz="0 0 0.0308"/>
     <parent link="kuka_link7"/>
     <child link="kuka_link8"/>
     <axis xyz="0 0 0"/>

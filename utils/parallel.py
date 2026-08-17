@@ -4,7 +4,16 @@ import traceback
 
 
 def parallel_worker(worker, args, kwargs, queue, proc_idx):
-    result = worker(*args, **kwargs)
+    try:
+        result = worker(*args, **kwargs)
+    except Exception:
+        # An uncaught exception here must still push to the queue: parallel_execute's
+        # final drain loop does queue.get() exactly n_active_proc times, so a worker
+        # that dies without a result silently hangs the whole batch forever instead of
+        # just failing this one candidate (which is already a normal, expected outcome
+        # elsewhere in this codebase, e.g. check_grasp_feasible's many `return None`s).
+        traceback.print_exc()
+        result = None
     queue.put([result, proc_idx, args, kwargs])
 
 
