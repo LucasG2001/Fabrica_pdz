@@ -199,6 +199,51 @@ robot setup further, refer to `planning/robot/workcell.py` and `planning/robot/g
 > onto the KUKA arm via forward kinematics as an approximation (see that script's docstring) —
 > re-plan with `kuka` for an exact result.
 
+#### Visually debugging grasp generation (headless, no display needed)
+
+If `run_grasp_arm_gen.py` (or the full `run_planning.sh`) produces zero (or very few) grasps for
+some part, `planning/utils/debug_grasp_headless.py` finds a concrete example candidate that fails
+a given check and renders it to PNG — no `DISPLAY`/X server required (uses
+`trimesh.Scene.save_image()`'s offscreen renderer, not `.show()`). It reports what fraction of
+candidates fail that check, then writes **gripper + part** close-ups from three angles (`iso`,
+`front`, `top`) of one example so you can see *why* (e.g. gripper mesh clipping through the ground
+plane, fingers colliding with the part they're grasping, or the antipodal-contact sampler finding
+no valid contact points) — plus, whenever IK for that candidate succeeds, a **`_wide` view with
+the full arm attached** too (solving the same IK `check_grasp_feasible` would, including its
+post-hoc FK-consistency check, so a bogus/non-converged IK solve is never rendered as if it were
+valid):
+
+```bash
+python planning/utils/debug_grasp_headless.py \
+  --assembly-dir assets/fabrica/ASSEMBLY_NAME \
+  --log-dir logs/EXP_NAME/ASSEMBLY_NAME \
+  --arm kuka --gripper kuka \
+  --part-id PART_ID \
+  --failure-mode ground-collision \
+  --out-dir /tmp/fabrica_grasp_debug
+```
+
+Requires `logs/EXP_NAME/ASSEMBLY_NAME/precedence.pkl` to already exist (i.e. run
+`run_preced_plan.py`, or the first stage of `run_planning.sh`, first). `--failure-mode` is one of:
+
+- `ground-collision` — buffered gripper mesh collides with the ground/fixture plane at the grasp
+  or retract pose (workcell/gripper-offset placement issue)
+- `self-collision` — gripper mesh collides with the very part it's trying to grasp at the closed
+  grasp pose (finger open/close direction or width issue)
+- `zero-contact` — the antipodal contact-point sampler (`compute_contact_points`) finds no
+  gripper-surface points landing inside the part (finger geometry/face-normal issue)
+- `success` — first candidate that passes the full `check_grasp_feasible` check (move **or**
+  hold), to sanity-check what a working grasp looks like, arm included
+
+Other useful flags: `--motion-type move|hold` picks which arm chain/base placement to solve IK
+for (only affects non-`success` modes — `success` shows whichever of move/hold actually passed,
+noting if that differs from what you asked for); `--no-arm` skips the IK solve and arm render
+entirely (gripper + part only, faster if you don't need the robot in frame).
+
+For grasps that already made it into `grasps.pkl` (i.e. you want to inspect a *successful* grasp,
+or a saved move/hold pair), use the existing `planning/utils/visualize_grasps.py` /
+`visualize_grasp_pair.py` instead — those use `trimesh.Scene.show()` and need a real display.
+
 ### 2. Learning two-part assembly policies
 
 Simulated training now defaults to the KUKA LBR iiwa7 + Y-gripper

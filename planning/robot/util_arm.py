@@ -85,7 +85,12 @@ def get_arm_chain(arm_type, motion_type=None, base_pos=None, base_euler=None, re
         first_link.bounds = (max(first_link.bounds[0], -0.5), first_link.bounds[1])
     else:
         raise ValueError('Unknown motion type: {}'.format(motion_type))
-    
+
+    # clamp rest_q into the (possibly reduced_limit-shrunk) joint bounds, so it always
+    # remains a feasible IK initial guess regardless of reduced_limit or arm_type
+    active_bounds = arm_chain.get_active_link_bounds()
+    arm_chain.rest_q = [float(np.clip(q, lo, hi)) for q, (lo, hi) in zip(arm_chain.rest_q, active_bounds)]
+
     return arm_chain
     
 

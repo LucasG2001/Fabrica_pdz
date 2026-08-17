@@ -472,8 +472,14 @@ def get_kuka_meshes_transforms(meshes, open_ratio):
     # own origin (xyz="0 0 0" in fabrica_kuka.urdf / kuka_iiwa7_y_gripper.urdf). No mirroring
     # scale matrix needed: left/right finger meshes are genuinely separate, not one mirrored
     # mesh.
-    transforms['kuka_leftfinger'] = get_translate_matrix([0, 4 * open_ratio, 0])
-    transforms['kuka_rightfinger'] = get_translate_matrix([0, -4 * open_ratio, 0])
+    # Sign is opposite of Panda's: left_finger.obj/right_finger.obj's own bodies already sit on
+    # the -Y/+Y side respectively (unlike Panda's single mirrored finger.obj, whose body sits on
+    # the far side with its inner face at local y=0), so translating by open_ratio must push each
+    # mesh further along its own side (leftfinger toward -Y, rightfinger toward +Y) to open the
+    # gripper. The old same-sign-as-Panda formula did the reverse -- closing further as open_ratio
+    # increased -- driving the fingers through the grasped part.
+    transforms['kuka_leftfinger'] = get_translate_matrix([0, -4 * open_ratio, 0])
+    transforms['kuka_rightfinger'] = get_translate_matrix([0, 4 * open_ratio, 0])
 
     return transforms
 
