@@ -2,7 +2,7 @@
 
 Inherits Factory base class and Factory abstract base class. Inherited by Fabrica environment classes. Not directly executed.
 
-Configuration defined in FabricaBase.yaml. Asset info defined in fabrica_asset_info_franka_table.yaml.
+Configuration defined in FabricaBase.yaml. Asset info defined in fabrica_asset_info_kuka_table.yaml.
 """
 
 
@@ -63,55 +63,55 @@ class FabricaBase(FactoryBase, FactoryABCBase):
         self.cfg_base = hydra.compose(config_name=config_path)
         self.cfg_base = self.cfg_base["task"]  # strip superfluous nesting
 
-        asset_info_path = "../../assets/fabrica/yaml/fabrica_asset_info_franka_table.yaml"  # relative to Gym's Hydra search path (cfg dir)
-        self.asset_info_franka_table = hydra.compose(config_name=asset_info_path)
-        self.asset_info_franka_table = self.asset_info_franka_table[""][""][""][""][""][
+        asset_info_path = "../../assets/fabrica/yaml/fabrica_asset_info_kuka_table.yaml"  # relative to Gym's Hydra search path (cfg dir)
+        self.asset_info_kuka_table = hydra.compose(config_name=asset_info_path)
+        self.asset_info_kuka_table = self.asset_info_kuka_table[""][""][""][""][""][
             ""
         ]["assets"]["fabrica"][
             "yaml"
         ]  # strip superfluous nesting
 
-    def import_franka_assets(self):
-        """Set Franka and table asset options. Import assets."""
+    def import_kuka_assets(self):
+        """Set Kuka and table asset options. Import assets."""
 
         urdf_root = os.path.join(
             os.path.dirname(__file__), "..", "..", "..", "assets", "fabrica", "urdf"
         )
 
-        franka_file = "fabrica_franka.urdf"
+        kuka_file = "fabrica_kuka.urdf"
 
-        franka_options = gymapi.AssetOptions()
-        franka_options.flip_visual_attachments = True
-        franka_options.fix_base_link = True
-        franka_options.collapse_fixed_joints = False
-        franka_options.thickness = 0.0  # default = 0.02
-        franka_options.density = 1000.0  # default = 1000.0
-        franka_options.armature = 0.01  # default = 0.0
-        franka_options.use_physx_armature = True
+        kuka_options = gymapi.AssetOptions()
+        kuka_options.flip_visual_attachments = True
+        kuka_options.fix_base_link = True
+        kuka_options.collapse_fixed_joints = False
+        kuka_options.thickness = 0.0  # default = 0.02
+        kuka_options.density = 1000.0  # default = 1000.0
+        kuka_options.armature = 0.01  # default = 0.0
+        kuka_options.use_physx_armature = True
         if self.cfg_base.sim.add_damping:
-            franka_options.linear_damping = (
+            kuka_options.linear_damping = (
                 1.0  # default = 0.0; increased to improve stability
             )
-            franka_options.max_linear_velocity = (
+            kuka_options.max_linear_velocity = (
                 1.0  # default = 1000.0; reduced to prevent CUDA errors
             )
-            franka_options.angular_damping = (
+            kuka_options.angular_damping = (
                 5.0  # default = 0.5; increased to improve stability
             )
-            franka_options.max_angular_velocity = (
+            kuka_options.max_angular_velocity = (
                 2 * math.pi
             )  # default = 64.0; reduced to prevent CUDA errors
         else:
-            franka_options.linear_damping = 0.0  # default = 0.0
-            franka_options.max_linear_velocity = 1.0  # default = 1000.0
-            franka_options.angular_damping = 0.5  # default = 0.5
-            franka_options.max_angular_velocity = 2 * math.pi  # default = 64.0
-        franka_options.disable_gravity = True
-        franka_options.enable_gyroscopic_forces = True
-        franka_options.default_dof_drive_mode = gymapi.DOF_MODE_NONE
-        franka_options.use_mesh_materials = True
+            kuka_options.linear_damping = 0.0  # default = 0.0
+            kuka_options.max_linear_velocity = 1.0  # default = 1000.0
+            kuka_options.angular_damping = 0.5  # default = 0.5
+            kuka_options.max_angular_velocity = 2 * math.pi  # default = 64.0
+        kuka_options.disable_gravity = True
+        kuka_options.enable_gyroscopic_forces = True
+        kuka_options.default_dof_drive_mode = gymapi.DOF_MODE_NONE
+        kuka_options.use_mesh_materials = True
         if self.cfg_base.mode.export_scene:
-            franka_options.mesh_normal_mode = gymapi.COMPUTE_PER_FACE
+            kuka_options.mesh_normal_mode = gymapi.COMPUTE_PER_FACE
 
         table_options = gymapi.AssetOptions()
         table_options.flip_visual_attachments = False  # default = False
@@ -131,18 +131,18 @@ class FabricaBase(FactoryBase, FactoryABCBase):
         if self.cfg_base.mode.export_scene:
             table_options.mesh_normal_mode = gymapi.COMPUTE_PER_FACE
 
-        franka_asset = self.gym.load_asset(
-            self.sim, urdf_root, franka_file, franka_options
+        kuka_asset = self.gym.load_asset(
+            self.sim, urdf_root, kuka_file, kuka_options
         )
         table_asset = self.gym.create_box(
             self.sim,
-            self.asset_info_franka_table.table_depth,
-            self.asset_info_franka_table.table_width,
+            self.asset_info_kuka_table.table_depth,
+            self.asset_info_kuka_table.table_width,
             self.cfg_base.env.table_height,
             table_options,
         )
 
-        return franka_asset, table_asset
+        return kuka_asset, table_asset
 
     def acquire_base_tensors(self):
         """Acquire and wrap tensors. Create views."""
@@ -163,10 +163,10 @@ class FabricaBase(FactoryBase, FactoryABCBase):
             self.sim
         )  # shape = (num_envs * num_bodies, 3)
         _jacobian = self.gym.acquire_jacobian_tensor(
-            self.sim, "franka"
+            self.sim, "kuka"
         )  # shape = (num envs, num_bodies, 6, num_dofs)
         _mass_matrix = self.gym.acquire_mass_matrix_tensor(
-            self.sim, "franka"
+            self.sim, "kuka"
         )  # shape = (num_envs, num_dofs, num_dofs)
 
         self.root_state = gymtorch.wrap_tensor(_root_state)
@@ -214,7 +214,7 @@ class FabricaBase(FactoryBase, FactoryABCBase):
         self.arm_dof_vel = self.dof_vel[:, 0:7]
         self.arm_mass_matrix = self.mass_matrix[
             :, 0:7, 0:7
-        ]  # for Franka arm (not gripper)
+        ]  # for Kuka arm (not gripper)
 
         self.robot_base_pos = self.body_pos[:, self.robot_base_body_id_env, 0:3]
         self.robot_base_quat = self.body_quat[:, self.robot_base_body_id_env, 0:4]
@@ -323,7 +323,7 @@ class FabricaBase(FactoryBase, FactoryABCBase):
         )
 
     def generate_ctrl_signals(self):
-        """Get Jacobian. Set Franka DOF position targets or DOF torques."""
+        """Get Jacobian. Set Kuka DOF position targets or DOF torques."""
         # Get desired Jacobian
         if self.cfg_ctrl['jacobian_type'] == 'geometric':
             self.fingertip_midpoint_jacobian_tf = self.fingertip_centered_jacobian
@@ -340,7 +340,7 @@ class FabricaBase(FactoryBase, FactoryABCBase):
             self._set_dof_torque()
 
     def _set_dof_pos_target(self):
-        """Set Franka DOF position target to move fingertips towards target pose."""
+        """Set Kuka DOF position target to move fingertips towards target pose."""
         self.ctrl_target_dof_pos = fc.compute_dof_pos_target(
             cfg_ctrl=self.cfg_ctrl,
             arm_dof_pos=self.arm_dof_pos,
@@ -353,10 +353,10 @@ class FabricaBase(FactoryBase, FactoryABCBase):
             device=self.device)
         self.gym.set_dof_position_target_tensor_indexed(self.sim,
                                                         gymtorch.unwrap_tensor(self.ctrl_target_dof_pos),
-                                                        gymtorch.unwrap_tensor(self.franka_actor_ids_sim),
-                                                        len(self.franka_actor_ids_sim))
+                                                        gymtorch.unwrap_tensor(self.kuka_actor_ids_sim),
+                                                        len(self.kuka_actor_ids_sim))
     def _set_dof_torque(self):
-        """Set Franka DOF torque to move fingertips towards target pose."""
+        """Set Kuka DOF torque to move fingertips towards target pose."""
         self.dof_torque = fc.compute_dof_torque(
             cfg_ctrl=self.cfg_ctrl,
             dof_pos=self.dof_pos,
@@ -376,8 +376,8 @@ class FabricaBase(FactoryBase, FactoryABCBase):
             device=self.device)
         self.gym.set_dof_actuation_force_tensor_indexed(self.sim,
                                                         gymtorch.unwrap_tensor(self.dof_torque),
-                                                        gymtorch.unwrap_tensor(self.franka_actor_ids_sim),
-                                                        len(self.franka_actor_ids_sim))
+                                                        gymtorch.unwrap_tensor(self.kuka_actor_ids_sim),
+                                                        len(self.kuka_actor_ids_sim))
 
     def simulate_and_refresh(self):
         """Simulate one step, refresh tensors, and render results."""
@@ -451,27 +451,27 @@ class FabricaBase(FactoryBase, FactoryABCBase):
             # Simulate one step
             self.simulate_and_refresh()
 
-        # Stabilize Franka
+        # Stabilize Kuka
         self.dof_vel[:, :] = 0.0
         self.dof_torque[:, :] = 0.0
         self.ctrl_target_fingertip_centered_pos = self.fingertip_centered_pos.clone()
         self.ctrl_target_fingertip_centered_quat = self.fingertip_centered_quat.clone()
 
         # Set DOF state
-        franka_actor_ids_sim = self.franka_actor_ids_sim.clone().to(dtype=torch.int32)
+        kuka_actor_ids_sim = self.kuka_actor_ids_sim.clone().to(dtype=torch.int32)
         self.gym.set_dof_state_tensor_indexed(
             self.sim,
             gymtorch.unwrap_tensor(self.dof_state),
-            gymtorch.unwrap_tensor(franka_actor_ids_sim),
-            len(franka_actor_ids_sim),
+            gymtorch.unwrap_tensor(kuka_actor_ids_sim),
+            len(kuka_actor_ids_sim),
         )
 
         # Set DOF torque
         self.gym.set_dof_actuation_force_tensor_indexed(
             self.sim,
             gymtorch.unwrap_tensor(self.dof_torque),
-            gymtorch.unwrap_tensor(franka_actor_ids_sim),
-            len(franka_actor_ids_sim),
+            gymtorch.unwrap_tensor(kuka_actor_ids_sim),
+            len(kuka_actor_ids_sim),
         )
 
         # Simulate one step to apply changes

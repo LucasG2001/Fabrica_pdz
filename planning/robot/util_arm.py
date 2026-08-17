@@ -27,6 +27,16 @@ def get_panda_arm_chain(base_pos, base_euler, reduced_limit=0.0):
     return chain
 
 
+def get_kuka_arm_chain(base_pos, base_euler, reduced_limit=0.0):
+    chain = Chain.from_urdf_file(os.path.join(project_base_dir, 'assets/kuka/kuka.urdf'), base_elements=['kuka_link0'],
+        origin_translation=np.array(base_pos), origin_orientation=np.array(base_euler), scale_translation=100, reduced_limit=reduced_limit)
+    # Same rest pose as the sim's kuka_rest_dof_pos (learning/isaacgymenvs/cfg/task/FabricaBase.yaml):
+    # Panda's rest pose with joint4 clipped from -135deg to -110deg to respect the iiwa7's
+    # tighter +/-119.7deg (+/-2.09rad) limit on joints 2/4/6.
+    chain.rest_q = [0, -np.pi / 4, 0, -1.9198621771937625, 0, np.pi / 2, np.pi / 4]
+    return chain
+
+
 def get_ur5e_arm_chain(base_pos, base_euler, reduced_limit=0.0):
     chain = Chain.from_urdf_file(os.path.join(project_base_dir, 'assets/ur5e/ur5e.urdf'), base_elements=['base_link'],
         origin_translation=np.array(base_pos), origin_orientation=np.array(base_euler), scale_translation=1, reduced_limit=reduced_limit)
@@ -55,6 +65,8 @@ def get_arm_chain(arm_type, motion_type=None, base_pos=None, base_euler=None, re
         arm_chain = get_xarm7_arm_chain(base_pos, base_euler, reduced_limit=reduced_limit)
     elif arm_type == 'panda':
         arm_chain = get_panda_arm_chain(base_pos, base_euler, reduced_limit=reduced_limit)
+    elif arm_type == 'kuka':
+        arm_chain = get_kuka_arm_chain(base_pos, base_euler, reduced_limit=reduced_limit)
     elif arm_type == 'ur5e':
         arm_chain = get_ur5e_arm_chain(base_pos, base_euler, reduced_limit=reduced_limit)
     else:

@@ -45,7 +45,7 @@ class FabricaFixPlugTaskAssemble(FabricaFixPlugEnv, FabricaTaskAssemble):
     def reset_idx(self, env_ids):
         """Reset specified environments."""
 
-        self._reset_franka(env_ids)
+        self._reset_kuka(env_ids)
         self._reset_object(env_ids)
 
         self.reset_buf[env_ids] = 0
@@ -56,18 +56,18 @@ class FabricaFixPlugTaskAssemble(FabricaFixPlugEnv, FabricaTaskAssemble):
 
         self.ctrl_target_fingertip_centered_quat_true[env_ids] = self.fingertip_centered_quat[env_ids].clone().detach()
 
-    def _reset_franka(self, env_ids):
-        """Reset DOF states and DOF targets of Franka."""
+    def _reset_kuka(self, env_ids):
+        """Reset DOF states and DOF targets of Kuka."""
 
         # shape of dof_pos = (num_envs, num_dofs)
         # shape of dof_vel = (num_envs, num_dofs)
 
-        # Initialize Franka 
+        # Initialize Kuka 
         self.dof_pos[env_ids] = self.arm_dof_pos_preassembly[env_ids, 0:7].clone().detach()
         self.dof_vel[env_ids] = 0.0  # shape = (num_envs, num_dofs)
         self.ctrl_target_dof_pos[env_ids] = self.arm_dof_pos_preassembly[env_ids, 0:7].clone().detach()
 
-        multi_env_ids_int32 = self.franka_actor_ids_sim[env_ids].flatten()
+        multi_env_ids_int32 = self.kuka_actor_ids_sim[env_ids].flatten()
         self.gym.set_dof_state_tensor_indexed(self.sim,
                                               gymtorch.unwrap_tensor(self.dof_state),
                                               gymtorch.unwrap_tensor(multi_env_ids_int32),
@@ -76,8 +76,8 @@ class FabricaFixPlugTaskAssemble(FabricaFixPlugEnv, FabricaTaskAssemble):
         # Set DOF torque
         self.gym.set_dof_actuation_force_tensor_indexed(self.sim,
                                                 gymtorch.unwrap_tensor(torch.zeros_like(self.dof_torque)),
-                                                gymtorch.unwrap_tensor(self.franka_actor_ids_sim),
-                                                len(self.franka_actor_ids_sim))
+                                                gymtorch.unwrap_tensor(self.kuka_actor_ids_sim),
+                                                len(self.kuka_actor_ids_sim))
 
         self.simulate_and_refresh()
 

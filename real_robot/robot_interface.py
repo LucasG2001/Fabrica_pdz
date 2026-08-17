@@ -137,7 +137,15 @@ class RobotInterface:
         self.joint_limits_max = KC.JOINT_LIMITS_MAX
 
         self.tool_to_base = RigidTransform(
-            translation=[0,0,0.1034],
+            # Translation updated to the KUKA Y-gripper's calibrated gripper_tcp offset
+            # (0.1455m, from kuka_iiwa7_y_gripper.urdf's gripper_tcp_joint -- same source used
+            # for fabrica_kuka.urdf's kuka_fingertip_centered_joint and the sim's
+            # palm_to_finger_dist). Rotation is UNCHANGED from the original Franka port (a
+            # 45-degree yaw matching panda_hand's frame convention) -- NOT verified against the
+            # KUKA Y-gripper's actual mount rotation. Frame name strings are intentionally left
+            # as "franka_tool"/"franka_tool_base": kukapy's get_pose()/goto_pose() use those
+            # exact strings for drop-in compatibility (see kukapy README's "Frame conventions").
+            translation=[0,0,0.1455],
             rotation=[[0.7071, 0.7071, 0], [-0.7071, 0.7071, 0], [0, 0, 1]],
             from_frame="franka_tool",
             to_frame="franka_tool_base")

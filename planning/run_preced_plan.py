@@ -200,7 +200,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--assembly-dir', type=str, required=True, help='directory of assembly')
     parser.add_argument('--log-dir', type=str, required=True)
-    parser.add_argument('--arm', type=str, default='panda', help='robot arm type')
+    parser.add_argument('--arm', type=str, default='kuka', help='robot arm type')
     parser.add_argument('--num-proc', type=int, default=1, help='number of processes')
     parser.add_argument('--inner-num-proc', type=int, default=6, help='number of inner processes')
     parser.add_argument('--verbose', action='store_true', default=False, help='verbose')

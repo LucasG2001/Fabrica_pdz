@@ -123,34 +123,34 @@ class FabricaTaskAsset(FabricaEnv, FactoryABCTask):
     def reset_idx(self, env_ids):
         """Reset specified environments."""
 
-        self._reset_franka(env_ids)
+        self._reset_kuka(env_ids)
         self._reset_object(env_ids)
 
         self.reset_buf[env_ids] = 0
         self.progress_buf[env_ids] = 0
 
-    def _reset_franka(self, env_ids):
-        """Reset DOF states and DOF targets of Franka."""
+    def _reset_kuka(self, env_ids):
+        """Reset DOF states and DOF targets of Kuka."""
 
         # shape of dof_pos = (num_envs, num_dofs)
         # shape of dof_vel = (num_envs, num_dofs)
 
-        # Initialize Franka to rest pose
-        self.dof_pos[:, 0:self.franka_num_dofs] = torch.cat(
-            (torch.tensor(self.cfg_base.env.franka_rest_dof_pos, device=self.device),
-             torch.tensor([self.asset_info_franka_table.franka_gripper_width_max], device=self.device),
-             torch.tensor([self.asset_info_franka_table.franka_gripper_width_max], device=self.device)),
+        # Initialize Kuka to rest pose
+        self.dof_pos[:, 0:self.kuka_num_dofs] = torch.cat(
+            (torch.tensor(self.cfg_base.env.kuka_rest_dof_pos, device=self.device),
+             torch.tensor([self.asset_info_kuka_table.kuka_gripper_width_max], device=self.device),
+             torch.tensor([self.asset_info_kuka_table.kuka_gripper_width_max], device=self.device)),
             dim=-1).unsqueeze(0).repeat((self.num_envs, 1))  # shape = (num_envs, num_dofs)
 
-        self.dof_vel[env_ids, 0:self.franka_num_dofs] = 0.0
+        self.dof_vel[env_ids, 0:self.kuka_num_dofs] = 0.0
 
-        franka_actor_ids_sim_int32 = self.franka_actor_ids_sim.to(dtype=torch.int32, device=self.device)[env_ids]
+        kuka_actor_ids_sim_int32 = self.kuka_actor_ids_sim.to(dtype=torch.int32, device=self.device)[env_ids]
         self.gym.set_dof_state_tensor_indexed(self.sim,
                                               gymtorch.unwrap_tensor(self.dof_state),
-                                              gymtorch.unwrap_tensor(franka_actor_ids_sim_int32),
-                                              len(franka_actor_ids_sim_int32))
+                                              gymtorch.unwrap_tensor(kuka_actor_ids_sim_int32),
+                                              len(kuka_actor_ids_sim_int32))
 
-        self.ctrl_target_dof_pos[env_ids, 0:self.franka_num_dofs] = self.dof_pos[env_ids, 0:self.franka_num_dofs]
+        self.ctrl_target_dof_pos[env_ids, 0:self.kuka_num_dofs] = self.dof_pos[env_ids, 0:self.kuka_num_dofs]
         self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(self.ctrl_target_dof_pos))
 
     def _reset_object(self, env_ids):

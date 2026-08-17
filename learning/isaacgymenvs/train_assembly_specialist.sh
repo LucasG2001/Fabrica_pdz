@@ -7,4 +7,4 @@ export CUDA_VISIBLE_DEVICES="$GPU"
 export NUM_ENVS=1024
 export MAX_ITER=1500
 
-python train.py task=FabricaFixPlugTaskAssemble task.env.assemblies=["$ASSEMBLY"] experiment=${EXP_NAME}_${ASSEMBLY} task.env.numEnvs=$NUM_ENVS max_iterations=$MAX_ITER headless=True task.env.franka_friction=$FRICTION
+python train.py task=FabricaFixPlugTaskAssemble task.env.assemblies=["$ASSEMBLY"] experiment=${EXP_NAME}_${ASSEMBLY} task.env.numEnvs=$NUM_ENVS max_iterations=$MAX_ITER headless=True task.env.kuka_friction=$FRICTION

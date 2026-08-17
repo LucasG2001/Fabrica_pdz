@@ -53,6 +53,30 @@ def get_panda_gripper_string(pos, quat, fixed):
     return string
 
 
+def get_kuka_gripper_string(pos, quat, fixed):
+    # Same structure as get_panda_gripper_string, but finger joints mount directly at
+    # kuka_hand's own origin (pos "0 0 0", not Panda's "0 0 5.84") -- matches
+    # kuka_finger_joint1/2's origin in fabrica_kuka.urdf / kuka_iiwa7_y_gripper.urdf.
+    base_type = 'fixed' if fixed else 'free3d-exp'
+    string = f'''
+<robot>
+    <link name="kuka_hand">
+        <joint name="kuka_hand" type="{base_type}" pos="{arr_to_str(pos)}" quat="{arr_to_str(quat)}"/>
+        <body name="kuka_hand" type="mesh" filename="kuka/visual/hand.obj" pos="0 0 0" quat="1 0 0 0" transform_type="OBJ_TO_JOINT" rgba = "1.0 1.0 1.0 1.0"/>
+        <link name="kuka_leftfinger">
+            <joint name="kuka_leftfinger" type="prismatic" axis="0 1 0" pos="0 0 0" quat="1 0 0 0" lim="0.0 4"/>
+            <body name="kuka_leftfinger" type="mesh" filename="kuka/visual/left_finger.obj" pos="0 0 0" quat="1 0 0 0" transform_type="OBJ_TO_JOINT" rgba = "0.1 0.1 0.1 1.0"/>
+        </link>
+        <link name="kuka_rightfinger">
+            <joint name="kuka_rightfinger" type="prismatic" axis="0 -1 0" pos="0 0 0" quat="1 0 0 0" lim="0.0 4"/>
+            <body name="kuka_rightfinger" type="mesh" filename="kuka/visual/right_finger.obj" pos="0 0 0" quat="1 0 0 0" transform_type="OBJ_TO_JOINT" rgba = "0.1 0.1 0.1 1.0"/>
+        </link>
+    </link>
+</robot>
+'''
+    return string
+
+
 def get_robotiq_85_gripper_string(pos, quat, fixed):
     base_type = 'fixed' if fixed else 'free3d-exp'
     string = f'''
@@ -165,6 +189,8 @@ def get_ft_sensor_substring():
 def get_gripper_string(gripper_type, pos, quat, fixed, has_ft_sensor=False, suffix=None):
     if gripper_type == 'panda':
         string = get_panda_gripper_string(pos, quat, fixed)
+    elif gripper_type == 'kuka':
+        string = get_kuka_gripper_string(pos, quat, fixed)
     elif gripper_type == 'robotiq-85':
         string = get_robotiq_85_gripper_string(pos, quat, fixed)
     elif gripper_type == 'robotiq-140':
@@ -313,6 +339,86 @@ def get_panda_arm_string(pos, quat):
     return string
 
 
+def get_kuka_arm_string(pos, quat):
+    # Same "abstract body + mesh visual + point-cloud contacts" structure as
+    # get_panda_arm_string, but joint axes are NOT all forced to "0 0 1": unlike Panda's URDF
+    # (which alternates the per-joint origin *rotation* so every joint's own axis stays local
+    # Z), fabrica_kuka.urdf / assets/kuka/kuka.urdf keep joint origins unrotated and vary the
+    # `axis` attribute instead (0 0 1 for joints 1/3/5/7, 0 +-1 0 for joints 2/4/6) -- ported
+    # directly from kuka_iiwa7_y_gripper.urdf's own convention. redmax's JointRevolute takes an
+    # arbitrary axis vector (Simulation_Constructor.cpp), so this is a direct, exact port of
+    # the same joint pos/axis/limit values already validated in fabrica_kuka.urdf and
+    # assets/kuka/kuka.urdf -- no axis-remapping/quat-conversion was needed. Mass values are
+    # placeholders copied from get_panda_arm_string's own (already non-physical, uniform-density
+    # "abstract" body) values -- same as upstream, since this feeds rendering/playback only
+    # (not the RL training or motion-planning physics).
+    string = f'''
+<robot>
+    <link name="kuka_link0">
+        <joint name="kuka_joint0" type="fixed" pos="{arr_to_str(pos)}" quat="{arr_to_str(quat)}"/>
+        <body name="kuka_link0" type="abstract" pos="0 0 0" quat="1 0 0 0" mass="2700" inertia="10000 0 0 10000 0 10000" rgba="0.8 0.8 0.8 1.0">
+            <visual mesh="kuka/visual/link0.obj" pos="0 0 0" quat="1 0 0 0"/>
+            <collision contacts="kuka/contacts/link0.txt" pos="0 0 0" quat="1 0 0 0"/>
+        </body>
+        <link name="kuka_link1">
+            <joint name="kuka_joint1" type="revolute" axis="0 0 1" pos="0 0 14.75" quat="1 0 0 0" lim="-2.97 2.97"/>
+            <body name="kuka_link1" type="abstract" pos="0 0 0" quat="1 0 0 0" mass="2700" inertia="10000 0 0 10000 0 10000" rgba="0.9 0.9 0.9 1.0">
+                <visual mesh="kuka/visual/link1.obj" pos="0 0 0" quat="1 0 0 0"/>
+                <collision contacts="kuka/contacts/link1.txt" pos="0 0 0" quat="1 0 0 0"/>
+            </body>
+            <link name="kuka_link2">
+                <joint name="kuka_joint2" type="revolute" axis="0 1 0" pos="0 -1.05 19.25" quat="1 0 0 0" lim="-2.09 2.09"/>
+                <body name="kuka_link2" type="abstract" pos="0 0 0" quat="1 0 0 0" mass="2730" inertia="10000 0 0 10000 0 10000" rgba="0.8 0.8 0.8 1.0">
+                    <visual mesh="kuka/visual/link2.obj" pos="0 0 0" quat="1 0 0 0"/>
+                    <collision contacts="kuka/contacts/link2.txt" pos="0 0 0" quat="1 0 0 0"/>
+                </body>
+                <link name="kuka_link3">
+                    <joint name="kuka_joint3" type="revolute" axis="0 0 1" pos="0 1.05 20.75" quat="1 0 0 0" lim="-2.97 2.97"/>
+                    <body name="kuka_link3" type="abstract" pos="0 0 0" quat="1 0 0 0" mass="2040" inertia="10000 0 0 10000 0 10000" rgba="0.9 0.9 0.9 1.0">
+                        <visual mesh="kuka/visual/link3.obj" pos="0 0 0" quat="1 0 0 0"/>
+                        <collision contacts="kuka/contacts/link3.txt" pos="0 0 0" quat="1 0 0 0"/>
+                    </body>
+                    <link name="kuka_link4">
+                        <joint name="kuka_joint4" type="revolute" axis="0 -1 0" pos="0 1.05 19.25" quat="1 0 0 0" lim="-2.09 2.09"/>
+                        <body name="kuka_link4" type="abstract" pos="0 0 0" quat="1 0 0 0" mass="2080" inertia="10000 0 0 10000 0 10000" rgba="0.8 0.8 0.8 1.0">
+                            <visual mesh="kuka/visual/link4.obj" pos="0 0 0" quat="1 0 0 0"/>
+                            <collision contacts="kuka/contacts/link4.txt" pos="0 0 0" quat="1 0 0 0"/>
+                        </body>
+                        <link name="kuka_link5">
+                            <joint name="kuka_joint5" type="revolute" axis="0 0 1" pos="0 -1.05 20.75" quat="1 0 0 0" lim="-2.97 2.97"/>
+                            <body name="kuka_link5" type="abstract" pos="0 0 0" quat="1 0 0 0" mass="3000" inertia="10000 0 0 10000 0 10000" rgba="0.9 0.9 0.9 1.0">
+                                <visual mesh="kuka/visual/link5.obj" pos="0 0 0" quat="1 0 0 0"/>
+                                <collision contacts="kuka/contacts/link5.txt" pos="0 0 0" quat="1 0 0 0"/>
+                            </body>
+                            <link name="kuka_link6">
+                                <joint name="kuka_joint6" type="revolute" axis="0 1 0" pos="0 -7.07 19.25" quat="1 0 0 0" lim="-2.09 2.09"/>
+                                <body name="kuka_link6" type="abstract" pos="0 0 0" quat="1 0 0 0" mass="1300" inertia="10000 0 0 10000 0 10000" rgba="0.8 0.8 0.8 1.0">
+                                    <visual mesh="kuka/visual/link6.obj" pos="0 0 0" quat="1 0 0 0"/>
+                                    <collision contacts="kuka/contacts/link6.txt" pos="0 0 0" quat="1 0 0 0"/>
+                                </body>
+                                <link name="kuka_link7">
+                                    <joint name="kuka_joint7" type="revolute" axis="0 0 1" pos="0 7.07 9.1" quat="1 0 0 0" lim="-3.05 3.05"/>
+                                    <body name="kuka_link7" type="abstract" pos="0 0 0" quat="1 0 0 0" mass="200" inertia="10000 0 0 10000 0 10000" rgba="0.9 0.9 0.9 1.0">
+                                        <visual mesh="kuka/visual/link7.obj" pos="0 0 0" quat="1 0 0 0"/>
+                                        <collision contacts="kuka/contacts/link7.txt" pos="0 0 0" quat="1 0 0 0"/>
+                                    </body>
+                                    <link name="kuka_link8">
+                                        <joint name="kuka_joint8" type="fixed" pos="0 0 3.08" quat="1 0 0 0"/>
+                                        <body name="kuka_link8" type="sphere" radius="0.01" pos="0 0 0" quat="1 0 0 0" rgba="0.9 0.9 0.9 1.0"/>
+                                    </link>
+                                </link>
+                            </link>
+                        </link>
+                    </link>
+                </link>
+            </link>
+        </link>
+    </link>
+</robot>
+'''
+    return string
+
+
 def get_ur5e_arm_string(pos, quat):
     string = f'''
 <robot>
@@ -379,6 +485,8 @@ def get_arm_string(arm_type, pos, quat, suffix=None):
         string = get_xarm7_arm_string(pos, quat)
     elif arm_type == 'panda':
         string = get_panda_arm_string(pos, quat)
+    elif arm_type == 'kuka':
+        string = get_kuka_arm_string(pos, quat)
     elif arm_type == 'ur5e':
         string = get_ur5e_arm_string(pos, quat)
     else:
@@ -391,6 +499,8 @@ def get_arm_eef_joint(arm_type):
         return 'joint7'
     elif arm_type == 'panda':
         return 'panda_joint8'
+    elif arm_type == 'kuka':
+        return 'kuka_joint8'
     elif arm_type == 'ur5e':
         return 'ee_fixed_joint'
     else:
@@ -402,6 +512,8 @@ def get_arm_joints(arm_type):
         return ['joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6', 'joint7']
     elif arm_type == 'panda':
         return ['panda_joint1', 'panda_joint2', 'panda_joint3', 'panda_joint4', 'panda_joint5', 'panda_joint6', 'panda_joint7']
+    elif arm_type == 'kuka':
+        return ['kuka_joint1', 'kuka_joint2', 'kuka_joint3', 'kuka_joint4', 'kuka_joint5', 'kuka_joint6', 'kuka_joint7']
     elif arm_type == 'ur5e':
         return ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint', 'wrist_1_joint', 'wrist_2_joint', 'wrist_3_joint']
     else:

@@ -6,7 +6,7 @@ defaults:
     - /factory_schema_config_env
 
 sim:
-    disable_franka_collisions: False
+    disable_kuka_collisions: False
 
 env:
     env_name: 'FabricaEnv'
@@ -23,12 +23,12 @@ env:
     assemblies_exclude: []
 
     plan_info_dir: plan_info
-    franka_urdf_dir: fabrica_franka
+    kuka_urdf_dir: fabrica_kuka
     yaml_pair_name: fabrica_pairs
 
     part_plug: null
     part_socket: null
 
-    franka_friction: 1.0
+    kuka_friction: 1.0
 
     in_hand_lateral_offset: 0.1

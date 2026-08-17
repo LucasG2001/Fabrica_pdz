@@ -38,9 +38,13 @@ sim:
 env:
     env_spacing: 0.5
     assembly_center: [0, -0.15, 0]
-    franka_pos: [0.454, 0.1975, -0.00495]
-    franka_euler: [0, 0, -1.559615883383144]
-    franka_rest_dof_pos: [0, -0.7853981633974483, 0, -2.356194490192345, 0, 1.5707963267948966, 0.7853981633974483]
+    kuka_pos: [0.454, 0.1975, -0.00495]  # unchanged from the Franka rig: matches the X/Y already calibrated in real_robot/robot_interface.py's pose_world_to_robot_base() for the KUKA rig
+    kuka_euler: [0, 0, -1.559615883383144]  # unchanged: matches the orientation already calibrated in real_robot/robot_interface.py's pose_world_to_robot_base()
+    # NOTE: joint4 clipped from the old Franka rest pose (-135deg) to -110deg to respect the
+    # iiwa7's tighter +/-119.7deg (+/-2.09rad) limit on joints 2/4/6 (vs. Franka's +/-120deg on
+    # joints 2/4/6 -- the difference matters here because Franka's rest pose used -135deg on
+    # joint4, past the iiwa7 limit). Not yet verified against the physical dual-arm rig.
+    kuka_rest_dof_pos: [0, -0.7853981633974483, 0, -1.9198621771937625, 0, 1.5707963267948966, 0.7853981633974483]
     table_height: 0.4
-    franka_friction: 1.0
+    kuka_friction: 1.0
     table_friction: 0.3

@@ -25,66 +25,66 @@ class FabricaFixPlugEnv(FabricaFixPlugBase, FabricaEnv):
         num_per_row = int(np.sqrt(self.num_envs))
 
         self.print_sdf_warning()
-        franka_assets = self.import_franka_assets()
+        kuka_assets = self.import_kuka_assets()
         table_asset = self.import_table_assets()
         socket_assets = self._import_env_assets()
         self._create_actors(
             lower,
             upper,
             num_per_row,
-            franka_assets,
+            kuka_assets,
             socket_assets,
             table_asset,
         )
 
-    def import_franka_assets(self):
-        """Set Franka and table asset options. Import assets."""
+    def import_kuka_assets(self):
+        """Set Kuka and table asset options. Import assets."""
 
         urdf_root = os.path.join(
-            os.path.dirname(__file__), "..", "..", "..", "assets", "fabrica", "urdf", self.cfg_env.env.franka_urdf_dir
+            os.path.dirname(__file__), "..", "..", "..", "assets", "fabrica", "urdf", self.cfg_env.env.kuka_urdf_dir
         )
 
-        franka_options = gymapi.AssetOptions()
-        franka_options.flip_visual_attachments = True
-        franka_options.fix_base_link = True
-        franka_options.collapse_fixed_joints = False
-        franka_options.thickness = 0.0  # default = 0.02
-        franka_options.density = 1000.0  # default = 1000.0
-        franka_options.armature = 0.01  # default = 0.0
-        franka_options.use_physx_armature = True
+        kuka_options = gymapi.AssetOptions()
+        kuka_options.flip_visual_attachments = True
+        kuka_options.fix_base_link = True
+        kuka_options.collapse_fixed_joints = False
+        kuka_options.thickness = 0.0  # default = 0.02
+        kuka_options.density = 1000.0  # default = 1000.0
+        kuka_options.armature = 0.01  # default = 0.0
+        kuka_options.use_physx_armature = True
         if self.cfg_base.sim.add_damping:
-            franka_options.linear_damping = (
+            kuka_options.linear_damping = (
                 1.0  # default = 0.0; increased to improve stability
             )
-            franka_options.max_linear_velocity = (
+            kuka_options.max_linear_velocity = (
                 1.0  # default = 1000.0; reduced to prevent CUDA errors
             )
-            franka_options.angular_damping = (
+            kuka_options.angular_damping = (
                 5.0  # default = 0.5; increased to improve stability
             )
-            franka_options.max_angular_velocity = (
+            kuka_options.max_angular_velocity = (
                 2 * math.pi
             )  # default = 64.0; reduced to prevent CUDA errors
         else:
-            franka_options.linear_damping = 0.0  # default = 0.0
-            franka_options.max_linear_velocity = 1.0  # default = 1000.0
-            franka_options.angular_damping = 0.5  # default = 0.5
-            franka_options.max_angular_velocity = 2 * math.pi  # default = 64.0
-        franka_options.disable_gravity = True
-        franka_options.enable_gyroscopic_forces = True
-        franka_options.default_dof_drive_mode = gymapi.DOF_MODE_NONE
-        franka_options.use_mesh_materials = True
+            kuka_options.linear_damping = 0.0  # default = 0.0
+            kuka_options.max_linear_velocity = 1.0  # default = 1000.0
+            kuka_options.angular_damping = 0.5  # default = 0.5
+            kuka_options.max_angular_velocity = 2 * math.pi  # default = 64.0
+        kuka_options.disable_gravity = True
+        kuka_options.enable_gyroscopic_forces = True
+        kuka_options.default_dof_drive_mode = gymapi.DOF_MODE_NONE
+        kuka_options.use_mesh_materials = True
         if self.cfg_base.mode.export_scene:
-            franka_options.mesh_normal_mode = gymapi.COMPUTE_PER_FACE
+            kuka_options.mesh_normal_mode = gymapi.COMPUTE_PER_FACE
 
         assemblies = self.cfg_env.env.assemblies
         part_plug, part_socket = self.cfg_env.env.part_plug, self.cfg_env.env.part_socket
         assert (part_plug is None and part_socket is None) or (part_plug is not None and part_socket is not None)
 
         self.part_names = {'assembly': [], 'plug': [], 'socket': []}
-        franka_assets = {}
+        kuka_assets = {}
         for assembly in assemblies:
-            franka_assets[assembly] = {}
+            kuka_assets[assembly] = {}
             
             if part_plug is not None and part_socket is not None:
                 part_pairs = [{'plug': str(part_plug), 'socket': str(part_socket)}]
@@ -96,13 +96,13 @@ class FabricaFixPlugEnv(FabricaFixPlugBase, FabricaEnv):
                 self.part_names['plug'].append(part_pair['plug'])
                 self.part_names['socket'].append(part_pair['socket'])
 
-                franka_file = f"{assembly}_{part_pair['plug']}_{part_pair['socket']}.urdf"
-                franka_asset = self.gym.load_asset(
-                    self.sim, urdf_root, franka_file, franka_options
+                kuka_file = f"{assembly}_{part_pair['plug']}_{part_pair['socket']}.urdf"
+                kuka_asset = self.gym.load_asset(
+                    self.sim, urdf_root, kuka_file, kuka_options
                 )
-                franka_assets[assembly][(part_pair['plug'], part_pair['socket'])] = franka_asset
+                kuka_assets[assembly][(part_pair['plug'], part_pair['socket'])] = kuka_asset
         
-        return franka_assets
+        return kuka_assets
 
     def _import_env_assets(self):
         """Set part asset options. Import assets."""
@@ -160,7 +160,7 @@ class FabricaFixPlugEnv(FabricaFixPlugBase, FabricaEnv):
         lower,
         upper,
         num_per_row,
-        franka_assets,
+        kuka_assets,
         socket_assets,
         table_asset,
     ):
@@ -168,11 +168,11 @@ class FabricaFixPlugEnv(FabricaFixPlugBase, FabricaEnv):
         # NOTE: Closely adapted from FactoryEnvInsertion; however, plug grasp offsets, plug widths, socket heights,
         # and asset indices are now stored for possible use during policy learning.""" # TODO: update
 
-        franka_pose = gymapi.Transform()
-        franka_pose.p.x = self.cfg_base.env.franka_pos[0]
-        franka_pose.p.y = self.cfg_base.env.franka_pos[1]
-        franka_pose.p.z = self.cfg_base.env.table_height + self.cfg_base.env.franka_pos[2]
-        franka_pose.r = gymapi.Quat.from_euler_zyx(*self.cfg_base.env.franka_euler)
+        kuka_pose = gymapi.Transform()
+        kuka_pose.p.x = self.cfg_base.env.kuka_pos[0]
+        kuka_pose.p.y = self.cfg_base.env.kuka_pos[1]
+        kuka_pose.p.z = self.cfg_base.env.table_height + self.cfg_base.env.kuka_pos[2]
+        kuka_pose.r = gymapi.Quat.from_euler_zyx(*self.cfg_base.env.kuka_euler)
 
         table_pose = gymapi.Transform()
         table_pose.p.x = 0.0
@@ -181,12 +181,12 @@ class FabricaFixPlugEnv(FabricaFixPlugBase, FabricaEnv):
         table_pose.r = gymapi.Quat(0.0, 0.0, 0.0, 1.0)
 
         self.env_ptrs = []
-        self.franka_handles = []
+        self.kuka_handles = []
         self.table_handles = []
         self.socket_handles = []
         self.shape_ids = []
         self.asset_indices = []
-        self.franka_actor_ids_sim = []  # within-sim indices
+        self.kuka_actor_ids_sim = []  # within-sim indices
         self.table_actor_ids_sim = []  # within-sim indices
         self.socket_actor_ids_sim = []  # within-sim indices
         actor_count = 0
@@ -199,13 +199,13 @@ class FabricaFixPlugEnv(FabricaFixPlugBase, FabricaEnv):
             assembly = self.part_names['assembly'][j]
             part_plug, part_socket = self.part_names['plug'][j], self.part_names['socket'][j]
 
-            franka_asset = franka_assets[assembly][(part_plug, part_socket)]
-            if self.cfg_env.sim.disable_franka_collisions:
-                franka_handle = self.gym.create_actor(env_ptr, franka_asset, franka_pose, 'franka', i + self.num_envs,
+            kuka_asset = kuka_assets[assembly][(part_plug, part_socket)]
+            if self.cfg_env.sim.disable_kuka_collisions:
+                kuka_handle = self.gym.create_actor(env_ptr, kuka_asset, kuka_pose, 'kuka', i + self.num_envs,
                                                       0, 0)
             else:
-                franka_handle = self.gym.create_actor(env_ptr, franka_asset, franka_pose, 'franka', i, 0, 0)
-            self.franka_actor_ids_sim.append(actor_count)
+                kuka_handle = self.gym.create_actor(env_ptr, kuka_asset, kuka_pose, 'kuka', i, 0, 0)
+            self.kuka_actor_ids_sim.append(actor_count)
             actor_count += 1
 
             part_pose = gymapi.Transform()
@@ -221,24 +221,24 @@ class FabricaFixPlugEnv(FabricaFixPlugBase, FabricaEnv):
             self.table_actor_ids_sim.append(actor_count)
             actor_count += 1
 
-            link7_id = self.gym.find_actor_rigid_body_index(env_ptr, franka_handle, 'panda_link7', gymapi.DOMAIN_ACTOR)
-            hand_id = self.gym.find_actor_rigid_body_index(env_ptr, franka_handle, 'panda_hand', gymapi.DOMAIN_ACTOR)
-            left_finger_id = self.gym.find_actor_rigid_body_index(env_ptr, franka_handle, 'panda_leftfinger',
+            link7_id = self.gym.find_actor_rigid_body_index(env_ptr, kuka_handle, 'kuka_link7', gymapi.DOMAIN_ACTOR)
+            hand_id = self.gym.find_actor_rigid_body_index(env_ptr, kuka_handle, 'kuka_hand', gymapi.DOMAIN_ACTOR)
+            left_finger_id = self.gym.find_actor_rigid_body_index(env_ptr, kuka_handle, 'kuka_leftfinger',
                                                                   gymapi.DOMAIN_ACTOR)
-            right_finger_id = self.gym.find_actor_rigid_body_index(env_ptr, franka_handle, 'panda_rightfinger',
+            right_finger_id = self.gym.find_actor_rigid_body_index(env_ptr, kuka_handle, 'kuka_rightfinger',
                                                                    gymapi.DOMAIN_ACTOR)
-            plug_id = self.gym.find_actor_rigid_body_index(env_ptr, franka_handle, part_plug, gymapi.DOMAIN_ACTOR)
+            plug_id = self.gym.find_actor_rigid_body_index(env_ptr, kuka_handle, part_plug, gymapi.DOMAIN_ACTOR)
             self.shape_ids = [link7_id, hand_id, left_finger_id, right_finger_id, plug_id]
 
-            franka_shape_props = self.gym.get_actor_rigid_shape_properties(env_ptr, franka_handle)
+            kuka_shape_props = self.gym.get_actor_rigid_shape_properties(env_ptr, kuka_handle)
             for shape_id in self.shape_ids:
-                franka_shape_props[shape_id].friction = self.cfg_env.env.franka_friction
-                franka_shape_props[shape_id].rolling_friction = 0.0  # default = 0.0
-                franka_shape_props[shape_id].torsion_friction = 0.0  # default = 0.0
-                franka_shape_props[shape_id].restitution = 0.0  # default = 0.0
-                franka_shape_props[shape_id].compliance = 0.0  # default = 0.0
-                franka_shape_props[shape_id].thickness = 0.0  # default = 0.0
-            self.gym.set_actor_rigid_shape_properties(env_ptr, franka_handle, franka_shape_props)
+                kuka_shape_props[shape_id].friction = self.cfg_env.env.kuka_friction
+                kuka_shape_props[shape_id].rolling_friction = 0.0  # default = 0.0
+                kuka_shape_props[shape_id].torsion_friction = 0.0  # default = 0.0
+                kuka_shape_props[shape_id].restitution = 0.0  # default = 0.0
+                kuka_shape_props[shape_id].compliance = 0.0  # default = 0.0
+                kuka_shape_props[shape_id].thickness = 0.0  # default = 0.0
+            self.gym.set_actor_rigid_shape_properties(env_ptr, kuka_handle, kuka_shape_props)
 
             part_shape_props = self.gym.get_actor_rigid_shape_properties(env_ptr, part_handle)
             part_shape_props[0].friction = self.asset_info_fabrica[assembly][part_socket]['friction']
@@ -258,12 +258,12 @@ class FabricaFixPlugEnv(FabricaFixPlugBase, FabricaEnv):
             table_shape_props[0].thickness = 0.0  # default = 0.0
             self.gym.set_actor_rigid_shape_properties(env_ptr, table_handle, table_shape_props)
 
-            self.franka_num_dofs = self.gym.get_actor_dof_count(env_ptr, franka_handle)
+            self.kuka_num_dofs = self.gym.get_actor_dof_count(env_ptr, kuka_handle)
 
-            self.gym.enable_actor_dof_force_sensors(env_ptr, franka_handle)
+            self.gym.enable_actor_dof_force_sensors(env_ptr, kuka_handle)
 
             self.env_ptrs.append(env_ptr)
-            self.franka_handles.append(franka_handle)
+            self.kuka_handles.append(kuka_handle)
             self.table_handles.append(table_handle)
             self.socket_handles.append(part_handle)
             self.asset_indices.append(j)
@@ -273,37 +273,37 @@ class FabricaFixPlugEnv(FabricaFixPlugBase, FabricaEnv):
         self.num_dofs = self.gym.get_env_dof_count(env_ptr)  # per env
 
         # For setting targets
-        self.franka_actor_ids_sim = torch.tensor(self.franka_actor_ids_sim, dtype=torch.int32, device=self.device)
+        self.kuka_actor_ids_sim = torch.tensor(self.kuka_actor_ids_sim, dtype=torch.int32, device=self.device)
         self.socket_actor_ids_sim = torch.tensor(self.socket_actor_ids_sim, dtype=torch.int32, device=self.device)
 
         self.socket_actor_id_env = self.gym.find_actor_index(env_ptr, 'socket', gymapi.DOMAIN_ENV)
 
         # For extracting body pos/quat, force, and Jacobian
-        self.robot_base_body_id_env = self.gym.find_actor_rigid_body_index(env_ptr, franka_handle,
-                                                                                   'panda_link0',
+        self.robot_base_body_id_env = self.gym.find_actor_rigid_body_index(env_ptr, kuka_handle,
+                                                                                   'kuka_link0',
                                                                                    gymapi.DOMAIN_ENV)
-        self.hand_body_id_env = self.gym.find_actor_rigid_body_index(env_ptr, franka_handle, 'panda_hand',
+        self.hand_body_id_env = self.gym.find_actor_rigid_body_index(env_ptr, kuka_handle, 'kuka_hand',
                                                                      gymapi.DOMAIN_ENV)
-        self.left_finger_body_id_env = self.gym.find_actor_rigid_body_index(env_ptr, franka_handle, 'panda_leftfinger',
+        self.left_finger_body_id_env = self.gym.find_actor_rigid_body_index(env_ptr, kuka_handle, 'kuka_leftfinger',
                                                                             gymapi.DOMAIN_ENV)
-        self.right_finger_body_id_env = self.gym.find_actor_rigid_body_index(env_ptr, franka_handle,
-                                                                             'panda_rightfinger', gymapi.DOMAIN_ENV)
-        self.fingertip_centered_body_id_env = self.gym.find_actor_rigid_body_index(env_ptr, franka_handle,
-                                                                                   'panda_fingertip_centered',
+        self.right_finger_body_id_env = self.gym.find_actor_rigid_body_index(env_ptr, kuka_handle,
+                                                                             'kuka_rightfinger', gymapi.DOMAIN_ENV)
+        self.fingertip_centered_body_id_env = self.gym.find_actor_rigid_body_index(env_ptr, kuka_handle,
+                                                                                   'kuka_fingertip_centered',
                                                                                    gymapi.DOMAIN_ENV)
-        self.plug_body_id_env = self.gym.find_actor_rigid_body_index(env_ptr, franka_handle, part_plug, gymapi.DOMAIN_ENV)
+        self.plug_body_id_env = self.gym.find_actor_rigid_body_index(env_ptr, kuka_handle, part_plug, gymapi.DOMAIN_ENV)
 
-        self.hand_body_id_env_actor = self.gym.find_actor_rigid_body_index(env_ptr, franka_handle, 'panda_hand',
+        self.hand_body_id_env_actor = self.gym.find_actor_rigid_body_index(env_ptr, kuka_handle, 'kuka_hand',
                                                                      gymapi.DOMAIN_ACTOR)
 
-        self.left_finger_body_id_env_actor = self.gym.find_actor_rigid_body_index(env_ptr, franka_handle, 'panda_leftfinger',
+        self.left_finger_body_id_env_actor = self.gym.find_actor_rigid_body_index(env_ptr, kuka_handle, 'kuka_leftfinger',
                                                                             gymapi.DOMAIN_ACTOR)
-        self.right_finger_body_id_env_actor = self.gym.find_actor_rigid_body_index(env_ptr, franka_handle,
-                                                                             'panda_rightfinger', gymapi.DOMAIN_ACTOR)
-        self.fingertip_centered_body_id_env_actor = self.gym.find_actor_rigid_body_index(env_ptr, franka_handle,
-                                                                                    'panda_fingertip_centered',
+        self.right_finger_body_id_env_actor = self.gym.find_actor_rigid_body_index(env_ptr, kuka_handle,
+                                                                             'kuka_rightfinger', gymapi.DOMAIN_ACTOR)
+        self.fingertip_centered_body_id_env_actor = self.gym.find_actor_rigid_body_index(env_ptr, kuka_handle,
+                                                                                    'kuka_fingertip_centered',
                                                                                    gymapi.DOMAIN_ACTOR)
-        self.plug_body_id_env_actor = self.gym.find_actor_rigid_body_index(env_ptr, franka_handle, part_plug, gymapi.DOMAIN_ACTOR)
+        self.plug_body_id_env_actor = self.gym.find_actor_rigid_body_index(env_ptr, kuka_handle, part_plug, gymapi.DOMAIN_ACTOR)
 
     def _acquire_env_tensors(self):
         """Acquire and wrap tensors. Create views."""

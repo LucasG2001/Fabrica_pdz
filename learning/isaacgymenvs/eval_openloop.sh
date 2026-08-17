@@ -28,7 +28,7 @@ for ASSEMBLY in "${ASSEMBLIES[@]}"; do
         max_iterations=1 \
         headless=True \
         test=True \
-        task.env.franka_friction=$FRICTION \
+        task.env.kuka_friction=$FRICTION \
         task.env.openloop=True \
         task.env.residual_action=False \
         >> "$LOG_FILE" 2>&1

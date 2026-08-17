@@ -29,7 +29,7 @@ for ASSEMBLY in "${ASSEMBLIES[@]}"; do
         max_iterations=1 \
         headless=True \
         test=True \
-        task.env.franka_friction=$FRICTION \
+        task.env.kuka_friction=$FRICTION \
         checkpoint=$CKPT \
         >> "$LOG_FILE" 2>&1
 done

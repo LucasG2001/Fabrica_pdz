@@ -15,7 +15,7 @@ if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--assembly-dir', type=str, required=True)
     parser.add_argument('--log-dir', type=str, required=True)
-    parser.add_argument('--arm', type=str, default='panda')
+    parser.add_argument('--arm', type=str, default='kuka')
     parser.add_argument('--num-proc', type=int, default=1)
     parser.add_argument('--outer-num-proc', type=int, default=1)
     parser.add_argument('--inner-num-proc', type=int, default=6)
