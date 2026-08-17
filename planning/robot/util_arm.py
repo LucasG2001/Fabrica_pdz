@@ -102,14 +102,35 @@ def get_ft_pos_from_gripper_pos_quat(gripper_type, gripper_pos, gripper_quat):
     return ft_pos
 
 
+def get_gripper_init_matrix(arm_chain, gripper_type, ef_init_matrix=None):
+    '''
+    Constant local rotation between the arm chain's tip frame and the "gripper frame" convention
+    (get_gripper_basis_directions), assuming the gripper is rigidly bolted to the tip.
+    '''
+    if ef_init_matrix is None:
+        ef_init_matrix = arm_chain.forward_kinematics_active(arm_chain.rest_q)[:3, :3]
+    if gripper_type == 'kuka':
+        # kuka.urdf's chain tip (kuka_link8) already *is* the gripper mount frame
+        # (gripper_base_link), including the real 180deg mount twist -- unlike Panda's chain
+        # (which omits panda_hand_joint's -45deg twist), there's no missing mesh-mount rotation
+        # left to reconstruct here. The heuristic below (assuming the chain tip points along a
+        # fixed world direction at rest_q) is only valid if rest_q happens to put the true tip at
+        # exactly that orientation -- true for Panda's candle-pose rest_q, but KUKA's rest_q
+        # (adapted from Panda's by clipping one joint, not re-derived for KUKA's own kinematics)
+        # does not satisfy it, which produced a real ~25-45deg constant misalignment between the
+        # rendered/IK-targeted gripper and the true flange orientation. Skip the heuristic:
+        # gripper frame == chain tip frame exactly, by construction of kuka.urdf's kuka_joint8.
+        return ef_init_matrix
+    base_init_direction, l2r_init_direction = [0, 0, 1], R.from_euler('xyz', arm_chain.links[0].origin_orientation).apply([0, -1, 0])
+    return R.align_vectors([base_init_direction, l2r_init_direction], [*get_gripper_basis_directions(gripper_type)])[0].as_matrix()
+
+
 def get_gripper_pos_quat_from_arm_q(arm_chain, arm_q, gripper_type, has_ft_sensor=False):
 
     ef_target_matrix = arm_chain.forward_kinematics(arm_q)
     ef_init_matrix = arm_chain.forward_kinematics_active(arm_chain.rest_q)[:3, :3]
-    arm_euler = arm_chain.links[0].origin_orientation
-    base_init_direction, l2r_init_direction = [0, 0, 1], R.from_euler('xyz', arm_euler).apply([0, -1, 0])
-    base_basis_direction, l2r_basis_direction = get_gripper_basis_directions(gripper_type)
-    gripper_init_matrix = R.align_vectors([base_init_direction, l2r_init_direction], [base_basis_direction, l2r_basis_direction])[0].as_matrix()
+    base_basis_direction, _ = get_gripper_basis_directions(gripper_type)
+    gripper_init_matrix = get_gripper_init_matrix(arm_chain, gripper_type, ef_init_matrix)
     gripper_target_matrix = ef_target_matrix[:3, :3] @ ef_init_matrix.T @ gripper_init_matrix
     gripper_pos, gripper_quat = ef_target_matrix[:3, 3], R.from_matrix(gripper_target_matrix).as_quat()[[3, 0, 1, 2]]
 
@@ -166,8 +187,7 @@ def get_ik_target_orientation(arm_chain, gripper_type, gripper_quat):
     Computes the target orientation for the end effector given the gripper orientation
     '''
     ef_init_matrix = arm_chain.forward_kinematics_active(arm_chain.rest_q)[:3, :3] # end effector initial rotation at rest pose
-    base_init_direction, l2r_init_direction = [0, 0, 1], R.from_euler('xyz', arm_chain.links[0].origin_orientation).apply([0, -1, 0])
-    gripper_init_matrix = R.align_vectors([base_init_direction, l2r_init_direction], [*get_gripper_basis_directions(gripper_type)])[0].as_matrix() # gripper initial rotation
+    gripper_init_matrix = get_gripper_init_matrix(arm_chain, gripper_type, ef_init_matrix) # gripper initial rotation
 
     gripper_target_matrix = R.from_quat(gripper_quat[[1, 2, 3, 0]]).as_matrix()
     ef_target_matrix = gripper_target_matrix @ gripper_init_matrix.T @ ef_init_matrix
@@ -180,11 +200,9 @@ def inverse_kinematics_correction(arm_chain, arm_q, gripper_type, gripper_quat):
     Computes the inverse kinematic on the specified target with correction on the last active joint angle
     '''
     arm_q = arm_q.copy()
-    arm_euler = arm_chain.links[0].origin_orientation
 
     ef_init_matrix = arm_chain.forward_kinematics_active(arm_chain.rest_q)[:3, :3] # end effector initial rotation at rest pose
-    base_init_direction, l2r_init_direction = [0, 0, 1], R.from_euler('xyz', arm_euler).apply([0, -1, 0])
-    gripper_init_matrix = R.align_vectors([base_init_direction, l2r_init_direction], [*get_gripper_basis_directions(gripper_type)])[0].as_matrix() # gripper initial rotation
+    gripper_init_matrix = get_gripper_init_matrix(arm_chain, gripper_type, ef_init_matrix) # gripper initial rotation
 
     ef_target_matrix = R.from_quat(gripper_quat[[1, 2, 3, 0]]).as_matrix() @ gripper_init_matrix.T @ ef_init_matrix # end effector target rotation for given gripper state
     ef_curr_matrix = arm_chain.forward_kinematics(arm_q) # end effector current rotation from current joint angles
@@ -205,11 +223,9 @@ def inverse_kinematics_correction(arm_chain, arm_q, gripper_type, gripper_quat):
 def check_inverse_kinematics_success(arm_chain, arm_q, gripper_type, gripper_quat, eps=1e-3, verbose=False):
 
     arm_q = arm_q.copy()
-    arm_euler = arm_chain.links[0].origin_orientation
 
     ef_init_matrix = arm_chain.forward_kinematics_active(arm_chain.rest_q)[:3, :3] # end effector initial rotation at rest pose
-    base_init_direction, l2r_init_direction = [0, 0, 1], R.from_euler('xyz', arm_euler).apply([0, -1, 0])
-    gripper_init_matrix = R.align_vectors([base_init_direction, l2r_init_direction], [*get_gripper_basis_directions(gripper_type)])[0].as_matrix() # gripper initial rotation
+    gripper_init_matrix = get_gripper_init_matrix(arm_chain, gripper_type, ef_init_matrix) # gripper initial rotation
 
     ef_target_matrix = R.from_quat(gripper_quat[[1, 2, 3, 0]]).as_matrix() @ gripper_init_matrix.T @ ef_init_matrix # end effector target rotation for given gripper state
     ef_curr_matrix = arm_chain.forward_kinematics(arm_q) # end effector current rotation from current joint angles
