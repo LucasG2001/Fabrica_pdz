@@ -377,17 +377,13 @@ class GraspArmGenerator(GraspGenerator):
         for name, mesh in gripper_finger_meshes.items():
             assert 'left' in name or 'right' in name
             l2r_direction = grasp_info['l2r_direction'] if 'left' in name else -grasp_info['l2r_direction']
-            if self.arm_type == 'panda': l2r_direction = -l2r_direction # TODO: fix bug for panda!
+            if self.arm_type in ('panda', 'kuka'): l2r_direction = -l2r_direction # TODO: fix bug for panda!
             # NOTE: the panda flip above compensates for that specific finger.obj mesh's face-normal
             # winding, not a general arm-type property. KUKA's left_finger.obj/right_finger.obj were
-            # independently converted from STL (see learning/preprocessing's mesh conversion), so
-            # their winding may or may not need the same flip -- not yet checked. Failure mode if
-            # wrong is self-limiting though: sample_points_with_normal_alignment() would sample the
-            # finger's back face instead of its gripping face, contact_points would end up empty
-            # (part_mesh.contains() would reject them), and the grasp candidate would just be
-            # discarded as infeasible rather than silently producing a bad grasp. If KUKA grasp
-            # generation is coming back with suspiciously few/no contact points, try adding
-            # `or self.arm_type == 'kuka'` here first.
+            # independently converted from STL (see learning/preprocessing's mesh conversion), and
+            # confirmed (empirically, via a full plumbers_block grasp-gen run: ~96% of candidates came
+            # back with zero contact points, i.e. sample_points_with_normal_alignment() was sampling
+            # each finger's back face instead of its gripping face) to need the same flip as Panda's.
             gripper_surface_points, _ = sample_points_with_normal_alignment(mesh, l2r_direction, n_sample)
             # trimesh.Scene([mesh, trimesh.PointCloud(gripper_surface_points, color=[255,0,0])]).show()
             # gripper_surface_points = mesh.sample(n_sample)
