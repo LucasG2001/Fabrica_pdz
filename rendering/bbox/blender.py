@@ -30,7 +30,7 @@ class Blender(object):
         scene.cycles.samples = samples # set samples
         scene.cycles.max_bounces = max_bounces # set max_bounces
         scene.cycles.film_exposure = film_exposure # set film_exposure
-        scene.cycles.film_transparent = transparent # set transparent background
+        scene.render.film_transparent = transparent # set transparent background
         scene.cycles.use_denoising = use_denoise # set use_denoising
         scene.view_layers[0]['cycles']['use_denoising'] = 1 if use_denoise else 0 # set use_denoising
 
@@ -74,17 +74,27 @@ class Blender(object):
     def set_shadow_threshold(self, threshold: float) -> None:
         scene = self.scene
         scene.use_nodes = True
-        tree = scene.node_tree
+        tree = scene.compositing_node_group
+        if tree is None:
+            # Blender >= 4.0: the compositor is a node group, not an implicit scene.node_tree
+            tree = bpy.data.node_groups.new('Compositor', 'CompositorNodeTree')
+            tree.interface.new_socket(name='Image', in_out='OUTPUT', socket_type='NodeSocketColor')
+            tree.interface.new_socket(name='Alpha', in_out='OUTPUT', socket_type='NodeSocketFloat')
+            scene.compositing_node_group = tree
 
-        compositor_node_val_to_rgb = tree.nodes.new('CompositorNodeValToRGB')
+        render_layers = tree.nodes.get('Render Layers') or tree.nodes.new('CompositorNodeRLayers')
+        render_layers.name = 'Render Layers'
+        composite = tree.nodes.get('Group Output') or tree.nodes.new('NodeGroupOutput')
+        tree.links.new(render_layers.outputs['Image'], composite.inputs['Image'])
+
+        # ColorRamp ('ValToRGB') is now a generic shader node usable inside the compositor tree
+        compositor_node_val_to_rgb = tree.nodes.new('ShaderNodeValToRGB')
         compositor_node_val_to_rgb.color_ramp.elements[0].color[3] = 0
         compositor_node_val_to_rgb.color_ramp.elements[0].position = threshold
         compositor_node_val_to_rgb.color_ramp.interpolation = 'CARDINAL'
 
-        render_layers = tree.nodes['Render Layers']
-        composite = tree.nodes['Composite']
-        tree.links.new(render_layers.outputs[1], compositor_node_val_to_rgb.inputs[0])
-        tree.links.new(compositor_node_val_to_rgb.outputs[1], composite.inputs[1])
+        tree.links.new(render_layers.outputs['Alpha'], compositor_node_val_to_rgb.inputs[0])
+        tree.links.new(compositor_node_val_to_rgb.outputs['Alpha'], composite.inputs['Alpha'])
 
     def save(self, path: PathLike) -> None:
         path = Path(path).resolve()

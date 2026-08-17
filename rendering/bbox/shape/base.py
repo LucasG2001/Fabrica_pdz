@@ -48,9 +48,13 @@ class BaseShape(BaseObj):
     def set_normal_mode(self, mode: str = 'vertex', **kwargs) -> None:
         bpy_mesh = self.bpy_data
         if mode.casefold() == 'vertex':
-            bpy_mesh.use_auto_smooth = kwargs.pop('use_auto_smooth', False)
-            bpy_mesh.auto_smooth_angle = math.radians(kwargs.pop('auto_smooth_angle', 30.0))
-            bpy_mesh.shade_smooth()
+            # Blender >= 4.1: auto smooth moved from Mesh props to the shade_smooth_by_angle operator
+            kwargs.pop('use_auto_smooth', None)
+            angle = math.radians(kwargs.pop('auto_smooth_angle', 30.0))
+            bpy_obj = self.bpy_obj
+            bpy.context.view_layer.objects.active = bpy_obj
+            bpy_obj.select_set(True)
+            bpy.ops.object.shade_smooth_by_angle(angle=angle)
         elif mode.casefold() == 'face':
             bpy_mesh.shade_flat()
         else:
