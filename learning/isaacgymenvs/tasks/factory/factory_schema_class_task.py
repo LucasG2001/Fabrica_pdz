@@ -92,8 +92,8 @@ class FactoryABCTask(ABC):
         pass
 
     @abstractmethod
-    def _reset_franka(self):
-        """Reset DOF states and DOF targets of Franka."""
+    def _reset_kuka(self):
+        """Reset DOF states and DOF targets of Kuka."""
         pass
 
     @abstractmethod

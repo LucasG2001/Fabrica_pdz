@@ -81,7 +81,17 @@ class FabricaBase(FactoryBase, FactoryABCBase):
         kuka_file = "fabrica_kuka.urdf"
 
         kuka_options = gymapi.AssetOptions()
-        kuka_options.flip_visual_attachments = True
+        # NOTE: unlike factory_franka.urdf (whose visual .dae and collision .stl are separate
+        # files with different authoring handedness, requiring this flip), fabrica_kuka.urdf's
+        # <visual> and <collision> geoms reference the exact same .STL file per link. Copying
+        # Franka's flip_visual_attachments=True here (as a leftover from the franka->kuka port)
+        # tears the visual mesh away from the physically-correct (unflipped) collision body used
+        # for actual contact -- rendering each link's mesh disconnected from its neighbors (arm
+        # looks "taken apart") and making real gripper-part contact look like action-at-a-distance
+        # (grasped object visibly separated from the rendered gripper). Verified headless via
+        # gym.write_camera_image_to_file: True -> floating disjoint link pieces, False -> one
+        # continuous, correctly assembled arm.
+        kuka_options.flip_visual_attachments = False
         kuka_options.fix_base_link = True
         kuka_options.collapse_fixed_joints = False
         kuka_options.thickness = 0.0  # default = 0.02
@@ -321,6 +331,29 @@ class FabricaBase(FactoryBase, FactoryABCBase):
         self.prev_actions = torch.zeros(
             (self.num_envs, self.num_actions), device=self.device
         )
+
+    def refresh_base_tensors(self):
+        """Refresh tensors."""
+        # NOTE: Tensor refresh functions should be called once per step, before setters.
+
+        self.gym.refresh_dof_state_tensor(self.sim)
+        self.gym.refresh_actor_root_state_tensor(self.sim)
+        self.gym.refresh_rigid_body_state_tensor(self.sim)
+        self.gym.refresh_dof_force_tensor(self.sim)
+        self.gym.refresh_net_contact_force_tensor(self.sim)
+        self.gym.refresh_jacobian_tensors(self.sim)
+        self.gym.refresh_mass_matrix_tensors(self.sim)
+
+        self.finger_midpoint_pos = (self.left_finger_pos + self.right_finger_pos) * 0.5
+        self.fingertip_midpoint_pos = fc.translate_along_local_z(pos=self.finger_midpoint_pos,
+                                                                 quat=self.hand_quat,
+                                                                 offset=self.asset_info_kuka_table.kuka_finger_length,
+                                                                 device=self.device)
+        # TODO: Add relative velocity term (see https://dynamicsmotioncontrol487379916.files.wordpress.com/2020/11/21-me258pointmovingrigidbody.pdf)
+        self.fingertip_midpoint_linvel = self.fingertip_centered_linvel + torch.cross(self.fingertip_centered_angvel,
+                                                                                      (self.fingertip_midpoint_pos - self.fingertip_centered_pos),
+                                                                                      dim=1)
+        self.fingertip_midpoint_jacobian = (self.left_finger_jacobian + self.right_finger_jacobian) * 0.5  # approximation
 
     def generate_ctrl_signals(self):
         """Get Jacobian. Set Kuka DOF position targets or DOF torques."""

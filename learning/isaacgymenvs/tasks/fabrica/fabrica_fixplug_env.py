@@ -45,7 +45,11 @@ class FabricaFixPlugEnv(FabricaFixPlugBase, FabricaEnv):
         )
 
         kuka_options = gymapi.AssetOptions()
-        kuka_options.flip_visual_attachments = True
+        # See fabrica_base.py's import_kuka_assets for why this must be False (not the
+        # Franka-copied True): fabrica_kuka.urdf's <visual> and <collision> geoms are the same
+        # .STL file per link, so flipping only the visual tears it away from the correct
+        # (unflipped) collision body -- verified headless, True produces disjoint floating links.
+        kuka_options.flip_visual_attachments = False
         kuka_options.fix_base_link = True
         kuka_options.collapse_fixed_joints = False
         kuka_options.thickness = 0.0  # default = 0.02

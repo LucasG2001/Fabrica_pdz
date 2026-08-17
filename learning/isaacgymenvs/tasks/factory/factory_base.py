@@ -423,21 +423,21 @@ class FactoryBase(VecTask, FactoryABCBase):
             deriv_gains = torch.cat((self.cfg_ctrl['joint_deriv_gains'],
                                      self.cfg_ctrl['gripper_deriv_gains']), dim=-1).to('cpu')
             # No tensor API for getting/setting actor DOF props; thus, loop required
-            for env_ptr, franka_handle, prop_gain, deriv_gain in zip(self.env_ptrs, self.franka_handles, prop_gains,
+            for env_ptr, kuka_handle, prop_gain, deriv_gain in zip(self.env_ptrs, self.kuka_handles, prop_gains,
                                                                      deriv_gains):
-                franka_dof_props = self.gym.get_actor_dof_properties(env_ptr, franka_handle)
-                franka_dof_props['driveMode'][:] = gymapi.DOF_MODE_POS
-                franka_dof_props['stiffness'] = prop_gain
-                franka_dof_props['damping'] = deriv_gain
-                self.gym.set_actor_dof_properties(env_ptr, franka_handle, franka_dof_props)
+                kuka_dof_props = self.gym.get_actor_dof_properties(env_ptr, kuka_handle)
+                kuka_dof_props['driveMode'][:] = gymapi.DOF_MODE_POS
+                kuka_dof_props['stiffness'] = prop_gain
+                kuka_dof_props['damping'] = deriv_gain
+                self.gym.set_actor_dof_properties(env_ptr, kuka_handle, kuka_dof_props)
         elif self.cfg_ctrl['motor_ctrl_mode'] == 'manual':
             # No tensor API for getting/setting actor DOF props; thus, loop required
-            for env_ptr, franka_handle in zip(self.env_ptrs, self.franka_handles):
-                franka_dof_props = self.gym.get_actor_dof_properties(env_ptr, franka_handle)
-                franka_dof_props['driveMode'][:] = gymapi.DOF_MODE_EFFORT
-                franka_dof_props['stiffness'][:] = 0.0  # zero passive stiffness
-                franka_dof_props['damping'][:] = 0.0  # zero passive damping
-                self.gym.set_actor_dof_properties(env_ptr, franka_handle, franka_dof_props)
+            for env_ptr, kuka_handle in zip(self.env_ptrs, self.kuka_handles):
+                kuka_dof_props = self.gym.get_actor_dof_properties(env_ptr, kuka_handle)
+                kuka_dof_props['driveMode'][:] = gymapi.DOF_MODE_EFFORT
+                kuka_dof_props['stiffness'][:] = 0.0  # zero passive stiffness
+                kuka_dof_props['damping'][:] = 0.0  # zero passive damping
+                self.gym.set_actor_dof_properties(env_ptr, kuka_handle, kuka_dof_props)
 
     def generate_ctrl_signals(self):
         """Get Jacobian. Set Franka DOF position targets or DOF torques."""
