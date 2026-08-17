@@ -8,11 +8,19 @@ ASSEMBLY_DIR=${4:-fabrica}
 ARM=""
 GRIPPER=""
 FT_SENSOR=""
+# Nullspace IK regularization pulling the solver toward rest_q (see run_grasp_arm_gen.py
+# --ik-regularization, default 1.0). That default was never re-tuned for KUKA's chain: at 1.0 it
+# over-constrains the solver and every KUKA grasp candidate fails IK even when the target is
+# reachable (verified via planning/utils/debug_grasp_headless.py -- 0/13 geometrically-clean
+# plumbers_block candidates converge at 1.0, vs 5/13 at 0.1). 0.1 keeps some regularization
+# (smoother joint trajectories) while letting the solver actually reach KUKA targets.
+IK_REGULARIZATION=1.0
 
 if [ "$SETUP" == "kuka" ]; then
   ARM="kuka"
   GRIPPER="kuka"
   FT_SENSOR="none"
+  IK_REGULARIZATION=0.1
 elif [ "$SETUP" == "panda" ]; then
   ARM="panda"
   GRIPPER="panda"
@@ -40,7 +48,7 @@ echo "Running precedence and path planning..."
 python planning/run_preced_plan.py --assembly-dir assets/$ASSEMBLY_DIR/$ASSEMBLY --log-dir logs/$EXP_NAME/$ASSEMBLY --num-proc 12 --arm $ARM
 
 echo "Running grasp and arm IK generation..."
-python planning/run_grasp_arm_gen.py --assembly-dir assets/$ASSEMBLY_DIR/$ASSEMBLY --log-dir logs/$EXP_NAME/$ASSEMBLY --num-proc 50 --max-n-grasp 100 --arm $ARM --gripper $GRIPPER --ft-sensor $FT_SENSOR
+python planning/run_grasp_arm_gen.py --assembly-dir assets/$ASSEMBLY_DIR/$ASSEMBLY --log-dir logs/$EXP_NAME/$ASSEMBLY --num-proc 50 --max-n-grasp 100 --arm $ARM --gripper $GRIPPER --ft-sensor $FT_SENSOR --ik-regularization $IK_REGULARIZATION
 
 echo "Running sequence planning..."
 python planning/run_seq_plan.py --assembly-dir assets/$ASSEMBLY_DIR/$ASSEMBLY --log-dir logs/$EXP_NAME/$ASSEMBLY --plot

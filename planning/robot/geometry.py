@@ -138,20 +138,17 @@ def get_kuka_grasp_base_offset():
     # (gripper_tcp_joint offset in kuka_iiwa7_y_gripper.urdf = 0.1455m = 14.55cm; same value
     # as learning's palm_to_finger_dist / kuka_fingertip_centered_joint).
     #
-    # STILL BROKEN (2026-08-17), do not trust this number: by the same logic that makes Panda's
-    # offset (11.24) work -- it lands almost exactly on the panda finger mesh's post-transform
-    # z-tip (11.23), comfortably clear of panda_hand's own z-max (6.6) -- 14.55 should land near
-    # KUKA's finger tip too (kuka_leftfinger/rightfinger local z max = 15.05, within 0.5cm). But
-    # unlike Panda (verified: 150/150 candidates get contact, only 33/150 = 22% self-collide),
-    # KUKA at offset=14.55 gets ZERO contact (0/150), and no value tried in [7.3, 14.55] gets
-    # both nonzero contact AND zero self-collision -- lowering the offset enough to reach the
-    # object with the fingers instead makes kuka_hand (the palm/motor-housing mesh) collide with
-    # the part (visually confirmed via render: the part overlaps the housing body, not the
-    # finger prongs). This isn't a scalar-offset problem like Panda's; something about the
-    # kuka_hand/finger mesh assembly's frame is likely off in a way a single constant can't fix
-    # (candidate: a missing rotation on the merged kuka_hand mesh, analogous to the 180deg-
-    # about-Z twist get_kuka_basis_directions() already needed). Not yet root-caused -- flagged
-    # for further investigation with the same visual-debug technique used to find this.
+    # PARTIALLY FIXED (2026-08-17): the root cause of the "zero contact at 14.55" symptom
+    # documented in earlier revisions of this comment was a missing mount rotation on the merged
+    # kuka_hand/finger mesh assembly -- it's authored 45deg off from the true gripper_base_link
+    # (flange) frame it's bolted to. Fixed in get_kuka_meshes_transforms() by rotating the whole
+    # assembly -45deg about the flange's own Z axis. Verified on plumbers_block part 0 at this
+    # offset (14.55): self-collision dropped from ~100% to 30.6% (382/1250) and zero-contact from
+    # ~100% (0/150 in the pre-fix sweep) to 77.6% (970/1250), yielding 13/1250 geometrically clean
+    # candidates (contact + no self-collision) where before there were none. Full
+    # check_grasp_feasible still rejects all 13 (0/13) -- every one fails IK (arm can't reach the
+    # target orientation), independent of ground-collision (7/13 also ground-collide). That's a
+    # separate, not-yet-investigated arm-reachability issue, not this mesh/offset defect.
     return 14.55
 
 
@@ -492,6 +489,15 @@ def get_kuka_meshes_transforms(meshes, open_ratio):
     # increased -- driving the fingers through the grasped part.
     transforms['kuka_leftfinger'] = get_translate_matrix([0, -4 * open_ratio, 0])
     transforms['kuka_rightfinger'] = get_translate_matrix([0, 4 * open_ratio, 0])
+
+    # The merged hand+finger mesh assembly is authored 45deg off from the true gripper_base_link
+    # (flange) frame it's mounted on: remount the whole assembly by rotating -45deg about the
+    # flange's own Z axis (approach axis, so this doesn't touch the -Z approach direction, only
+    # which way the Y closing axis/finger paddles point). Applied last (left-multiplied) so each
+    # mesh's own local open/close translation still happens in its own unrotated local frame first.
+    mount_rotation = get_revolute_matrix('Z', -np.pi / 4)
+    for name in transforms:
+        transforms[name] = mount_rotation @ transforms[name]
 
     return transforms
 
