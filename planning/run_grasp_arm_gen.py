@@ -17,6 +17,7 @@ import json
 
 from assets.transform import get_transform_from_path
 from planning.robot.util_grasp import compute_antipodal_pairs, generate_gripper_states, get_antipodal_aligned_grasp, sample_points_with_normal_alignment, get_grasp_info_from_gripper_state, get_reverse_grasp
+from planning.robot.graspplanning_import import load_graspplanning_antipodal_pairs, load_graspplanning_antipodal_pair_by_grasp_id, DEFAULT_GRASPPLANNING_CACHE_DIR
 from planning.robot.util_arm import get_arm_chain, get_ik_target_orientation, get_gripper_pos_quat_from_arm_q, get_ft_pos_from_gripper_pos_quat
 from planning.robot.workcell import get_dual_arm_box
 from planning.robot.geometry import load_arm_meshes, transform_gripper_meshes, transform_arm_meshes, get_arm_meshes_transforms, get_gripper_meshes_transforms, get_buffered_arm_meshes, \
@@ -402,7 +403,7 @@ class GraspArmGenerator(GraspGenerator):
         if not ik_success: grasp.arm_q_retract = None
         return grasp
     
-    def generate_grasps(self, part_id, max_n_grasp=None, n_proc=1, verbose=False):
+    def generate_grasps(self, part_id, max_n_grasp=None, n_proc=1, verbose=False, antipodal_pairs=None):
         grasps_cand = []
         grasp_id = 0
 
@@ -413,8 +414,16 @@ class GraspArmGenerator(GraspGenerator):
         # for part_after in self.G_preced.nodes[part_id]['parts_after']: # NOTE: disabled due to slowing down
         #     collision_meshes.append(self.part_meshes[part_after].copy().apply_transform(self.part_final_transforms[part_after]))
 
-        # compute antipodal points
-        antipodal_pairs = compute_antipodal_pairs(part_mesh, sample_budget=self.n_surface_pt, antipodal_thres=self.antipodal_thres, collision_meshes=collision_meshes)
+        # compute antipodal points (or use candidate pairs supplied by an external sampler, e.g.
+        # Grasp_Planning's stage-1 cache -- see load_graspplanning_antipodal_pairs). Externally
+        # supplied pairs are treated as already contact-verified upstream (Grasp_Planning's own
+        # antipodal_alignment/contact_support/pad_support_* scoring) -- skip Fabrica's own
+        # finger-mesh-resample-vs-part.contains() re-check below, which is a separate, lossy
+        # filter (85-100% loss even against Fabrica's own compute_antipodal_pairs candidates) that
+        # ends up discarding ~100% of the tighter, more precise Grasp_Planning-sourced pairs.
+        skip_contact_filter = antipodal_pairs is not None
+        if antipodal_pairs is None:
+            antipodal_pairs = compute_antipodal_pairs(part_mesh, sample_budget=self.n_surface_pt, antipodal_thres=self.antipodal_thres, collision_meshes=collision_meshes)
         for antipodal_points in antipodal_pairs:
             open_ratio = get_gripper_open_ratio(self.gripper_type, antipodal_points)
             if open_ratio is None or open_ratio > 0.95: continue
@@ -425,16 +434,21 @@ class GraspArmGenerator(GraspGenerator):
                 gripper_pos_list, gripper_quat_list = generate_gripper_states(self.gripper_type, antipodal_points_i, open_ratio, self.n_angle, offset_delta=self.offset_delta)
                 for gripper_pos, gripper_quat in zip(gripper_pos_list, gripper_quat_list):
                     grasp = Grasp(part_id, grasp_id, gripper_pos, gripper_quat, open_ratio)
+                    if skip_contact_filter:
+                        grasp.contact_points = antipodal_points_i
                     grasp_id += 1
                     grasps_cand.append(grasp)
 
         # calculate gripper-part contact area
-        grasps_cand_new = []
-        args = [(grasp, part_id, self.n_surface_pt) for grasp in grasps_cand]
-        for grasp in parallel_execute(self.compute_contact_points, args, num_proc=n_proc, show_progress=verbose, desc='contact area computation'):
-            if len(grasp.contact_points) == 0:
-                continue
-            grasps_cand_new.append(grasp)
+        if skip_contact_filter:
+            grasps_cand_new = grasps_cand
+        else:
+            grasps_cand_new = []
+            args = [(grasp, part_id, self.n_surface_pt) for grasp in grasps_cand]
+            for grasp in parallel_execute(self.compute_contact_points, args, num_proc=n_proc, show_progress=verbose, desc='contact area computation'):
+                if len(grasp.contact_points) == 0:
+                    continue
+                grasps_cand_new.append(grasp)
         grasps_cand = grasps_cand_new
 
         # check grasp feasibility
@@ -464,9 +478,10 @@ class GraspArmGenerator(GraspGenerator):
         
         return grasps
     
-    def generate_grasps_all(self, max_n_grasp=None, n_proc=1, verbose=False):
+    def generate_grasps_all(self, max_n_grasp=None, n_proc=1, verbose=False, antipodal_pairs_by_part=None):
         grasps = {part_id: [] for part_id in self.part_ids}
-        args = [(part_id, max_n_grasp, max(n_proc // len(self.part_ids), 1), False) for part_id in self.part_ids]
+        antipodal_pairs_by_part = antipodal_pairs_by_part or {}
+        args = [(part_id, max_n_grasp, max(n_proc // len(self.part_ids), 1), False, antipodal_pairs_by_part.get(part_id)) for part_id in self.part_ids]
         for grasps_i, ret_arg in parallel_execute(self.generate_grasps, args, num_proc=min(n_proc, len(self.part_ids)), return_args=True, show_progress=verbose, desc='grasp generation'):
             part_id = ret_arg[0]
             grasps[part_id] = grasps_i
@@ -553,14 +568,14 @@ class GraspArmGenerator(GraspGenerator):
         return grasp_id_pairs_all
     
 
-def run_grasp_arm_gen(assembly_dir, log_dir, gripper, arm, ft_sensor, seed, n_surface_pt, n_angle, antipodal_thres, ik_optimizer, ik_regularization, offset_delta, reduced_limit, max_n_grasp, num_proc, verbose):
+def run_grasp_arm_gen(assembly_dir, log_dir, gripper, arm, ft_sensor, seed, n_surface_pt, n_angle, antipodal_thres, ik_optimizer, ik_regularization, offset_delta, reduced_limit, max_n_grasp, num_proc, verbose, use_graspplanning=False, graspplanning_cache_dir=None, graspplanning_grasp_ids_json=None):
     asset_folder = os.path.join(project_base_dir, './assets')
 
     precedence_path = os.path.join(log_dir, 'precedence.pkl')
     if not os.path.exists(precedence_path):
         print(f'[run_grasp_arm_gen] {precedence_path} not found')
         return
-    
+
     with open(precedence_path, 'rb') as fp:
         G_preced = pickle.load(fp)
 
@@ -572,7 +587,44 @@ def run_grasp_arm_gen(assembly_dir, log_dir, gripper, arm, ft_sensor, seed, n_su
     grasp_generator = GraspArmGenerator(asset_folder, assembly_dir, G_preced, gripper, arm, has_ft_sensor,
         seed, n_surface_pt, n_angle, antipodal_thres, ik_optimizer, ik_regularization, offset_delta, reduced_limit)
 
-    grasps_all = grasp_generator.generate_grasps_all(max_n_grasp=max_n_grasp, n_proc=num_proc, verbose=verbose)
+    antipodal_pairs_by_part = None
+    if use_graspplanning:
+        assembly_name = os.path.basename(os.path.normpath(assembly_dir))
+        targeted_cases = None
+        if graspplanning_grasp_ids_json:
+            with open(graspplanning_grasp_ids_json, 'r') as fp:
+                targeted_cases = json.load(fp)
+        antipodal_pairs_by_part = {}
+        for part_id in grasp_generator.part_ids:
+            if targeted_cases is not None and part_id in targeted_cases:
+                # this part is an incoming (moved/inserted) part in targeted_cases.json -- use its
+                # own single verified antipodal pair (the "move"/inserter grasp).
+                pts_cm, _candidate = load_graspplanning_antipodal_pair_by_grasp_id(
+                    assembly_name, part_id, targeted_cases[part_id]['inserter_grasp_id'],
+                    cache_dir=graspplanning_cache_dir,
+                    fabrica_part_mesh_raw=grasp_generator.part_meshes[part_id],
+                    fabrica_final_transform=grasp_generator.part_final_transforms[part_id])
+                antipodal_pairs_by_part[part_id] = pts_cm
+            elif targeted_cases is not None:
+                # part_id absent from targeted_cases.json by construction => the base/anchor part
+                # (see nifty-munching-snowflake.md Part 2/3): use the holder_grasp_id, identical
+                # across all entries since Grasp_Planning's holder always grasps a fixed point on
+                # this anchor part.
+                holder_grasp_id = next(iter(targeted_cases.values()))['holder_grasp_id']
+                pts_cm, _candidate = load_graspplanning_antipodal_pair_by_grasp_id(
+                    assembly_name, part_id, holder_grasp_id, cache_dir=graspplanning_cache_dir,
+                    fabrica_part_mesh_raw=grasp_generator.part_meshes[part_id],
+                    fabrica_final_transform=grasp_generator.part_final_transforms[part_id])
+                antipodal_pairs_by_part[part_id] = pts_cm
+            else:
+                antipodal_pairs_by_part[part_id] = load_graspplanning_antipodal_pairs(
+                    assembly_name, part_id, cache_dir=graspplanning_cache_dir,
+                    fabrica_part_mesh_raw=grasp_generator.part_meshes[part_id],
+                    fabrica_final_transform=grasp_generator.part_final_transforms[part_id])
+            if verbose:
+                print(f'[run_grasp_arm_gen] loaded {len(antipodal_pairs_by_part[part_id])} Grasp_Planning antipodal pair(s) for part {part_id}')
+
+    grasps_all = grasp_generator.generate_grasps_all(max_n_grasp=max_n_grasp, n_proc=num_proc, verbose=verbose, antipodal_pairs_by_part=antipodal_pairs_by_part)
     grasp_id_pairs_all = grasp_generator.filter_grasp_id_pairs_all(grasps_all, n_proc=num_proc, verbose=verbose)
 
     if log_dir is not None:
@@ -638,6 +690,9 @@ if __name__ == '__main__':
     parser.add_argument('--num-proc', type=int, default=1, help='number of processes')
     parser.add_argument('--seed', type=int, default=0, help='random seed')
     parser.add_argument('--verbose', action='store_true', default=False, help='verbose')
+    parser.add_argument('--use-graspplanning', action='store_true', default=False, help='source antipodal candidate pairs from the sibling ~/Grasp_Planning repo\'s stage-1 cache instead of Fabrica\'s own compute_antipodal_pairs sampler')
+    parser.add_argument('--graspplanning-cache-dir', type=str, default=None, help=f'override for the Grasp_Planning stage-1 cache dir (default: {DEFAULT_GRASPPLANNING_CACHE_DIR})')
+    parser.add_argument('--graspplanning-grasp-ids-json', type=str, default=None, help='path to a targeted_cases.json (part_id -> {holder_grasp_id, inserter_grasp_id}) restricting each part to a single verified Grasp_Planning grasp_id instead of all unfiltered stage-1 candidates; requires --use-graspplanning')
     args = parser.parse_args()
 
-    run_grasp_arm_gen(args.assembly_dir, args.log_dir, args.gripper, args.arm, args.ft_sensor, args.seed, args.n_surface_pt, args.n_angle, args.antipodal_thres, args.ik_optimizer, args.ik_regularization, args.offset_delta, args.reduced_limit, args.max_n_grasp, args.num_proc, args.verbose)
+    run_grasp_arm_gen(args.assembly_dir, args.log_dir, args.gripper, args.arm, args.ft_sensor, args.seed, args.n_surface_pt, args.n_angle, args.antipodal_thres, args.ik_optimizer, args.ik_regularization, args.offset_delta, args.reduced_limit, args.max_n_grasp, args.num_proc, args.verbose, args.use_graspplanning, args.graspplanning_cache_dir, args.graspplanning_grasp_ids_json)
