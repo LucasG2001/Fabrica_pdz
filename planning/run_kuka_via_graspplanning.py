@@ -268,7 +268,8 @@ def stop_shared_moveit(process, log_fp):
         log_fp.close()
 
 
-def find_one_successful_case(graspplanning_root, benchmark_config, config_path, part_id, output_dir, log_dir):
+def find_one_successful_case(graspplanning_root, benchmark_config, config_path, part_id, output_dir, log_dir,
+                              ros_domain_id=0):
     '''
     Loops candidate placement/orientation combos from the benchmark config (the same 12
     placements x 8 orientations = 96 combos/part an exhaustive sweep would use), each time
@@ -307,6 +308,7 @@ def find_one_successful_case(graspplanning_root, benchmark_config, config_path, 
                 '--orientations', orientation_id,
                 '--limit-cases', '1',
                 '--ik-only', '--reuse-moveit',
+                '--ros-domain-id', str(ros_domain_id),
             ]
             run_logged(
                 command, cwd=graspplanning_root,
@@ -347,7 +349,8 @@ def run_targeted_grasp_search(graspplanning_root, config_path, precedence_order,
         targeted_cases = {}
         for part_id in precedence_order:
             record = find_one_successful_case(
-                graspplanning_root, benchmark_config, config_path, part_id, output_dir, log_dir)
+                graspplanning_root, benchmark_config, config_path, part_id, output_dir, log_dir,
+                ros_domain_id=ros_domain_id)
             step_id = record['step_id']
             pair_id = record['pair_id']
             holder_role_id, inserter_role_id = _lookup_pair_grasp_ids(
