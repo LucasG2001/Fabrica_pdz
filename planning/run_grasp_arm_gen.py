@@ -606,16 +606,25 @@ def run_grasp_arm_gen(assembly_dir, log_dir, gripper, arm, ft_sensor, seed, n_su
                     fabrica_final_transform=grasp_generator.part_final_transforms[part_id])
                 antipodal_pairs_by_part[part_id] = pts_cm
             elif targeted_cases is not None:
-                # part_id absent from targeted_cases.json by construction => the base/anchor part
-                # (see nifty-munching-snowflake.md Part 2/3): use the holder_grasp_id, identical
-                # across all entries since Grasp_Planning's holder always grasps a fixed point on
-                # this anchor part.
-                holder_grasp_id = next(iter(targeted_cases.values()))['holder_grasp_id']
-                pts_cm, _candidate = load_graspplanning_antipodal_pair_by_grasp_id(
-                    assembly_name, part_id, holder_grasp_id, cache_dir=graspplanning_cache_dir,
-                    fabrica_part_mesh_raw=grasp_generator.part_meshes[part_id],
-                    fabrica_final_transform=grasp_generator.part_final_transforms[part_id])
-                antipodal_pairs_by_part[part_id] = pts_cm
+                # part_id absent from targeted_cases.json by construction => the base/anchor part.
+                # NOTE: contrary to nifty-munching-snowflake.md Part 2/3's assumption, the
+                # holder_grasp_id is NOT identical across entries -- confirmed against the live
+                # targeted search for plumbers_block: parts 0/1 both got g0820, but part 3 got
+                # g0837 and part 4 got g1264. The holder grasps the growing subassembly, whose
+                # geometry (and thus its best antipodal contact pair) changes per precedence step,
+                # not a single fixed point on this part alone. So supply the union of every
+                # distinct holder_grasp_id seen across all entries, not just one -- whichever step
+                # Fabrica's own SequencePlanner picks this part's hold grasp for can then find a
+                # candidate matching what Grasp_Planning actually verified for that step.
+                holder_grasp_ids = sorted({entry['holder_grasp_id'] for entry in targeted_cases.values()})
+                pts_cm_list = []
+                for holder_grasp_id in holder_grasp_ids:
+                    pts_cm_i, _candidate = load_graspplanning_antipodal_pair_by_grasp_id(
+                        assembly_name, part_id, holder_grasp_id, cache_dir=graspplanning_cache_dir,
+                        fabrica_part_mesh_raw=grasp_generator.part_meshes[part_id],
+                        fabrica_final_transform=grasp_generator.part_final_transforms[part_id])
+                    pts_cm_list.append(pts_cm_i)
+                antipodal_pairs_by_part[part_id] = np.concatenate(pts_cm_list, axis=0)
             else:
                 antipodal_pairs_by_part[part_id] = load_graspplanning_antipodal_pairs(
                     assembly_name, part_id, cache_dir=graspplanning_cache_dir,
