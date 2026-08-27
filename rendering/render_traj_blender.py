@@ -98,8 +98,11 @@ def get_gripper_shapes(gripper_type, gripper_meshes, has_ft_sensor, mat_map):
                             mat = mat_map['joint']
                         else:
                             mat = mat_map['hand']
-                    elif gripper_type == 'panda' or gripper_type == 'kuka':
-                        color = submesh.visual.material.diffuse / 255
+                    elif gripper_type == 'panda' or gripper_type in ('kuka', 'pdz'):
+                        if hasattr(submesh.visual, 'material') and hasattr(submesh.visual.material, 'diffuse'):
+                            color = submesh.visual.material.diffuse / 255
+                        else:
+                            color = np.array([0.6, 0.6, 0.6, 1.0])
                         color = color**3
                         mat = bbox.mat.PlasticMat(bbox.utils.Color.from_rgb(*color, saturation=1.0, value=4.0))
                     else:

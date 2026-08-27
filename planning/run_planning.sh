@@ -16,11 +16,18 @@ FT_SENSOR=""
 # (smoother joint trajectories) while letting the solver actually reach KUKA targets.
 IK_REGULARIZATION=1.0
 
+USE_GRASPPLANNING=""
+
 if [ "$SETUP" == "kuka" ]; then
   ARM="kuka"
   GRIPPER="kuka"
   FT_SENSOR="none"
   IK_REGULARIZATION=0.1
+  # Fabrica's own antipodal sampler still under-samples KUKA's bulkier Y-gripper geometry (see
+  # fabrica_kuka_ik_and_grasp_gaps memory) -- source candidate antipodal pairs from the sibling
+  # ~/Grasp_Planning repo's already-computed, denser, assembly-aware stage-1 cache instead. Only
+  # works for assemblies that repo has been run on already (no live fallback).
+  USE_GRASPPLANNING="--use-graspplanning"
 elif [ "$SETUP" == "panda" ]; then
   ARM="panda"
   GRIPPER="panda"
@@ -48,7 +55,7 @@ echo "Running precedence and path planning..."
 python planning/run_preced_plan.py --assembly-dir assets/$ASSEMBLY_DIR/$ASSEMBLY --log-dir logs/$EXP_NAME/$ASSEMBLY --num-proc 12 --arm $ARM
 
 echo "Running grasp and arm IK generation..."
-python planning/run_grasp_arm_gen.py --assembly-dir assets/$ASSEMBLY_DIR/$ASSEMBLY --log-dir logs/$EXP_NAME/$ASSEMBLY --num-proc 50 --max-n-grasp 100 --arm $ARM --gripper $GRIPPER --ft-sensor $FT_SENSOR --ik-regularization $IK_REGULARIZATION
+python planning/run_grasp_arm_gen.py --assembly-dir assets/$ASSEMBLY_DIR/$ASSEMBLY --log-dir logs/$EXP_NAME/$ASSEMBLY --num-proc 50 --max-n-grasp 100 --arm $ARM --gripper $GRIPPER --ft-sensor $FT_SENSOR --ik-regularization $IK_REGULARIZATION $USE_GRASPPLANNING
 
 echo "Running sequence planning..."
 python planning/run_seq_plan.py --assembly-dir assets/$ASSEMBLY_DIR/$ASSEMBLY --log-dir logs/$EXP_NAME/$ASSEMBLY --plot

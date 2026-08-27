@@ -30,10 +30,21 @@ def get_panda_arm_chain(base_pos, base_euler, reduced_limit=0.0):
 def get_kuka_arm_chain(base_pos, base_euler, reduced_limit=0.0):
     chain = Chain.from_urdf_file(os.path.join(project_base_dir, 'assets/kuka/kuka.urdf'), base_elements=['kuka_link0'],
         origin_translation=np.array(base_pos), origin_orientation=np.array(base_euler), scale_translation=100, reduced_limit=reduced_limit)
-    # Same rest pose as the sim's kuka_rest_dof_pos (learning/isaacgymenvs/cfg/task/FabricaBase.yaml):
-    # Panda's rest pose with joint4 clipped from -135deg to -110deg to respect the iiwa7's
-    # tighter +/-119.7deg (+/-2.09rad) limit on joints 2/4/6.
-    chain.rest_q = [0, -np.pi / 4, 0, -1.9198621771937625, 0, np.pi / 2, np.pi / 4]
+    # UPDATED (2026-08-24): was the Panda-derived rest pose below (kept for the RL side's
+    # historical context -- see git history / learning/isaacgymenvs/cfg/task/FabricaBase.yaml's
+    # kuka_rest_dof_pos, which is a separately-maintained YAML this change does NOT touch).
+    #   [0, -np.pi / 4, 0, -1.9198621771937625, 0, np.pi / 2, np.pi / 4]
+    # Replaced with the reference dual-arm-kuka branch's KUKA-specific high-elbow rest pose,
+    # confirmed by an exact numeric replay check: this is the rest_q that pdz plumbers_block
+    # grasps were actually solved/regularized against (reconstructing a stored grasp's flange
+    # quaternion from its arm_q via get_gripper_pos_quat_from_arm_q only matches exactly at this
+    # rest_q -- any other value, including the old one above, produces a wrong constant rotation
+    # for any gripper that goes through the general basis-alignment path in
+    # get_gripper_init_matrix, i.e. everything except gripper_type=='kuka' itself, which is
+    # unaffected since its own shortcut cancels rest_q out entirely). Pitch angles sum to pi so
+    # the flange still points straight down at rest; A4=-1.6 stays inside the reduced bound
+    # +-1.662 when reduced_limit=0.1.
+    chain.rest_q = [0., 0.2, 0., -1.6, 0., np.pi - 0.2 - 1.6, 0.]
     return chain
 
 
@@ -120,6 +131,12 @@ def get_gripper_init_matrix(arm_chain, gripper_type, ef_init_matrix=None):
         # does not satisfy it, which produced a real ~25-45deg constant misalignment between the
         # rendered/IK-targeted gripper and the true flange orientation. Skip the heuristic:
         # gripper frame == chain tip frame exactly, by construction of kuka.urdf's kuka_joint8.
+        #
+        # This shortcut is specific to the KUKA Y-gripper's own mount convention (kuka_joint8's
+        # baked-in 180deg twist matches the Y-gripper's local mesh frame exactly). It must NOT
+        # be extended to 'pdz': the real pdz gripper mounts with a different relationship (its
+        # CAD closing axis is local +X, not the Y-gripper's +Y -- see get_pdz_basis_directions),
+        # so pdz needs to fall through to the general basis-direction heuristic below instead.
         return ef_init_matrix
     base_init_direction, l2r_init_direction = [0, 0, 1], R.from_euler('xyz', arm_chain.links[0].origin_orientation).apply([0, -1, 0])
     return R.align_vectors([base_init_direction, l2r_init_direction], [*get_gripper_basis_directions(gripper_type)])[0].as_matrix()

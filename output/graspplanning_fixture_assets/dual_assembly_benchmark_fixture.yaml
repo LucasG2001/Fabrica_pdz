@@ -1,0 +1,118 @@
+base:
+  floor_z_world_m: -0.03
+  position_world_m:
+  - 0.65
+  - 0.0
+  - -0.03
+  yaw_deg: 0.0
+benchmark:
+  artifact_root: /home/pdzuser/Grasp_Planning/artifacts/dual_grasp_planning_fixture
+  assembly: plumbers_block
+  exact_ik_beam_width: 4
+  exact_ik_candidates: 7
+  exact_ik_seed_perturbation_rad: 0.6
+  ik_solver: kdl
+  ik_timeout_s: 0.35
+  isaac_python: /media/pdz/Elements1/IsaacLab/isaaclab.sh
+  joint_rank_candidates: 8
+  max_ik_screen_candidates: 0
+  max_pair_attempts: 256
+  output_dir: /home/pdzuser/Grasp_Planning/artifacts/dual_assembly_benchmark_fixture/plumbers_block
+  pickup_approach_ik_steps: 5
+  pickup_pregrasp_offsets_m:
+  - 0.1
+  - 0.075
+  - 0.05
+  - 0.025
+  planning_attempts: 16
+  planning_time_s: 15.0
+  ros_domain_id: 0
+orientations:
+- id: upright_yaw_0
+  rpy_deg:
+  - 0.0
+  - 0.0
+  - 0.0
+- id: upright_yaw_90
+  rpy_deg:
+  - 0.0
+  - 0.0
+  - 90.0
+- id: upright_yaw_180
+  rpy_deg:
+  - 0.0
+  - 0.0
+  - 180.0
+- id: upright_yaw_270
+  rpy_deg:
+  - 0.0
+  - 0.0
+  - 270.0
+- id: roll_90_yaw_0
+  rpy_deg:
+  - 90.0
+  - 0.0
+  - 0.0
+- id: roll_90_yaw_90
+  rpy_deg:
+  - 90.0
+  - 0.0
+  - 90.0
+- id: pitch_90_yaw_0
+  rpy_deg:
+  - 0.0
+  - 90.0
+  - 0.0
+- id: pitch_90_yaw_90
+  rpy_deg:
+  - 0.0
+  - 90.0
+  - 90.0
+physics:
+  critical_damping_ratio: 1.0
+  dynamic_friction: 4.0
+  finger_contact_min_force_n: 0.25
+  gripper_close_duration_s: 3.0
+  gripper_contact_preload_m: 0.0004
+  gripper_effort_limit: 200.0
+  static_friction: 5.0
+placements:
+- id: left_inner_front
+  x: 0.44
+  y: -0.18
+- id: left_inner_middle
+  x: 0.55
+  y: -0.18
+- id: left_inner_back
+  x: 0.66
+  y: -0.18
+- id: left_outer_front
+  x: 0.44
+  y: -0.3
+- id: left_outer_middle
+  x: 0.55
+  y: -0.3
+- id: left_outer_back
+  x: 0.66
+  y: -0.3
+- id: right_inner_front
+  x: 0.44
+  y: 0.18
+- id: right_inner_middle
+  x: 0.55
+  y: 0.18
+- id: right_inner_back
+  x: 0.66
+  y: 0.18
+- id: right_outer_front
+  x: 0.44
+  y: 0.3
+- id: right_outer_middle
+  x: 0.55
+  y: 0.3
+- id: right_outer_back
+  x: 0.66
+  y: 0.3
+selection:
+  incoming_parts: []
+  limit_cases: null

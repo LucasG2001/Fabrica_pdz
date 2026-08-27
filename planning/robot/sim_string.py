@@ -77,6 +77,42 @@ def get_kuka_gripper_string(pos, quat, fixed):
     return string
 
 
+def get_pdz_gripper_string(gripper_type, pos, quat, fixed):
+    """Build the RedMax visualization model for a PDZ gripper variant.
+
+    PDZ meshes are authored in the flange frame at the fully closed pose. The
+    two fingers therefore only need their signed prismatic displacement. The
+    complete variants also carry the separately authored D405 collision box so
+    that the recorded motion depicts the same occupied volume used by planning.
+    """
+    base_type = 'fixed' if fixed else 'free3d-exp'
+    folder = gripper_type.replace('-', '_')
+    d405_link = ''
+    if '-mech' not in gripper_type:
+        d405_link = f'''
+        <link name="pdz_d405">
+            <joint name="pdz_d405" type="fixed" pos="0 0 0" quat="1 0 0 0"/>
+            <body name="pdz_d405" type="mesh" filename="{folder}/collision/d405.obj" pos="0 0 0" quat="1 0 0 0" transform_type="OBJ_TO_JOINT" rgba="0.12 0.12 0.12 1.0"/>
+        </link>'''
+    string = f'''
+<robot>
+    <link name="pdz_base">
+        <joint name="pdz_base" type="{base_type}" pos="{arr_to_str(pos)}" quat="{arr_to_str(quat)}"/>
+        <body name="pdz_base" type="mesh" filename="{folder}/visual/base.obj" pos="0 0 0" quat="1 0 0 0" transform_type="OBJ_TO_JOINT" rgba="0.28 0.28 0.30 1.0"/>
+        <link name="pdz_left_finger">
+            <joint name="pdz_left_finger" type="prismatic" axis="-1 0 0" pos="0 0 0" quat="1 0 0 0" lim="0.0 3.2"/>
+            <body name="pdz_left_finger" type="mesh" filename="{folder}/visual/finger_left.obj" pos="0 0 0" quat="1 0 0 0" transform_type="OBJ_TO_JOINT" rgba="0.12 0.12 0.12 1.0"/>
+        </link>
+        <link name="pdz_right_finger">
+            <joint name="pdz_right_finger" type="prismatic" axis="1 0 0" pos="0 0 0" quat="1 0 0 0" lim="0.0 3.2"/>
+            <body name="pdz_right_finger" type="mesh" filename="{folder}/visual/finger_right.obj" pos="0 0 0" quat="1 0 0 0" transform_type="OBJ_TO_JOINT" rgba="0.12 0.12 0.12 1.0"/>
+        </link>{d405_link}
+    </link>
+</robot>
+'''
+    return string
+
+
 def get_robotiq_85_gripper_string(pos, quat, fixed):
     base_type = 'fixed' if fixed else 'free3d-exp'
     string = f'''
@@ -195,6 +231,8 @@ def get_gripper_string(gripper_type, pos, quat, fixed, has_ft_sensor=False, suff
         string = get_robotiq_85_gripper_string(pos, quat, fixed)
     elif gripper_type == 'robotiq-140':
         string = get_robotiq_140_gripper_string(pos, quat, fixed)
+    elif gripper_type.startswith('pdz'):
+        string = get_pdz_gripper_string(gripper_type, pos, quat, fixed)
     else:
         raise ValueError('Unknown gripper type: {}'.format(gripper_type))
     

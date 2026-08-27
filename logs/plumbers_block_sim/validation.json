@@ -1,0 +1,142 @@
+{
+  "success": true,
+  "scope": "dense exact insertion replay",
+  "insertion_segments": 4,
+  "insertion_samples": 952,
+  "intended_terminal_ground_contact_samples": 0,
+  "all_parts_final": true,
+  "table_bounds_cm": {
+    "lower": [
+      -55.5,
+      -87.7
+    ],
+    "upper": [
+      55.5,
+      27.3
+    ]
+  },
+  "support_footprints": {
+    "fixture": {
+      "lower_cm": [
+        -12.5,
+        -62.70000076
+      ],
+      "upper_cm": [
+        12.5,
+        -42.70000076
+      ],
+      "within_table": true
+    },
+    "pickup_part_0": {
+      "lower_cm": [
+        -8.741714180876466,
+        -48.83614600000001
+      ],
+      "upper_cm": [
+        0.5374882438448827,
+        -44.563854
+      ],
+      "within_table": true
+    },
+    "final_part_0": {
+      "lower_cm": [
+        -2.13614,
+        -19.0
+      ],
+      "upper_cm": [
+        2.136152,
+        -11.0
+      ],
+      "within_table": true
+    },
+    "pickup_part_1": {
+      "lower_cm": [
+        3.099755102168084,
+        -54.83614600000001
+      ],
+      "upper_cm": [
+        6.250156992470586,
+        -52.33914013937982
+      ],
+      "within_table": true
+    },
+    "final_part_1": {
+      "lower_cm": [
+        -5.44164,
+        -16.12348
+      ],
+      "upper_cm": [
+        -2.55836,
+        -13.62336
+      ],
+      "within_table": true
+    },
+    "pickup_part_2": {
+      "lower_cm": [
+        -8.74171418087646,
+        -60.836146
+      ],
+      "upper_cm": [
+        5.5043371483562655,
+        -56.83614599999999
+      ],
+      "within_table": true
+    },
+    "final_part_2": {
+      "lower_cm": [
+        -8.0,
+        -16.87342
+      ],
+      "upper_cm": [
+        8.0,
+        -12.87342
+      ],
+      "within_table": true
+    },
+    "pickup_part_3": {
+      "lower_cm": [
+        -8.74171418087646,
+        -54.83614599999999
+      ],
+      "upper_cm": [
+        1.0997551021680856,
+        -50.83614599999999
+      ],
+      "within_table": true
+    },
+    "final_part_3": {
+      "lower_cm": [
+        -5.0,
+        -16.87342
+      ],
+      "upper_cm": [
+        5.0,
+        -12.87342
+      ],
+      "within_table": true
+    },
+    "pickup_part_4": {
+      "lower_cm": [
+        2.5374882438448836,
+        -48.836146
+      ],
+      "upper_cm": [
+        8.741714180876464,
+        -46.33914385374126
+      ],
+      "within_table": true
+    },
+    "final_part_4": {
+      "lower_cm": [
+        2.55836,
+        -16.12348
+      ],
+      "upper_cm": [
+        5.44164,
+        -13.62336
+      ],
+      "within_table": true
+    }
+  },
+  "failures": []
+}

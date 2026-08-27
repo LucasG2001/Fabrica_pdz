@@ -47,8 +47,8 @@ def get_buffered_meshes(meshes, buffer):
 
 
 def get_buffered_gripper_meshes(gripper_type, gripper_meshes):
-    finger_buffer = 0.25
-    hand_knuckle_buffer = 1.0
+    finger_buffer = 0.2
+    hand_knuckle_buffer = 0.2
     gripper_finger_meshes = {}
     gripper_hand_knuckle_meshes = {}
     for name, mesh in gripper_meshes.items():
@@ -62,7 +62,7 @@ def get_buffered_gripper_meshes(gripper_type, gripper_meshes):
 
 
 def get_buffered_arm_meshes(arm_meshes):
-    return get_buffered_meshes(arm_meshes, buffer=1.0)
+    return get_buffered_meshes(arm_meshes, buffer=0.2)
 
 
 def get_combined_mesh(scene_or_mesh):
@@ -138,18 +138,44 @@ def get_kuka_grasp_base_offset():
     # (gripper_tcp_joint offset in kuka_iiwa7_y_gripper.urdf = 0.1455m = 14.55cm; same value
     # as learning's palm_to_finger_dist / kuka_fingertip_centered_joint).
     #
-    # PARTIALLY FIXED (2026-08-17): the root cause of the "zero contact at 14.55" symptom
-    # documented in earlier revisions of this comment was a missing mount rotation on the merged
-    # kuka_hand/finger mesh assembly -- it's authored 45deg off from the true gripper_base_link
-    # (flange) frame it's bolted to. Fixed in get_kuka_meshes_transforms() by rotating the whole
-    # assembly -45deg about the flange's own Z axis. Verified on plumbers_block part 0 at this
-    # offset (14.55): self-collision dropped from ~100% to 30.6% (382/1250) and zero-contact from
-    # ~100% (0/150 in the pre-fix sweep) to 77.6% (970/1250), yielding 13/1250 geometrically clean
-    # candidates (contact + no self-collision) where before there were none. Full
-    # check_grasp_feasible still rejects all 13 (0/13) -- every one fails IK (arm can't reach the
-    # target orientation), independent of ground-collision (7/13 also ground-collide). That's a
-    # separate, not-yet-investigated arm-reachability issue, not this mesh/offset defect.
+    # REVERTED (2026-08-18): a prior revision of this comment recorded a "fix" that added a
+    # -45deg Z rotation to the whole hand+finger mesh assembly in get_kuka_meshes_transforms(),
+    # on the theory the mesh was authored 45deg off from gripper_base_link. That was checked
+    # against the actual ground-truth sources -- ~/Grasp_Planning's hardware-canonical
+    # kuka_iiwa7_y_gripper.urdf and the real dual-arm MoveIt config's y_gripper.xacro (used by
+    # Masterthesis-vision/scripts/launch_gripper_moveit_debug.launch.py) -- and disproven: both
+    # mount hand.STL/left_finger.STL/right_finger.STL directly at gripper_base_link with
+    # `origin xyz="0 0 0" rpy="0 0 0"`, no 45deg twist anywhere; assets/kuka's hand.obj is that
+    # exact STL (byte-identical, just re-scaled), so it needs the same identity mount. The only
+    # real rotation is the 180deg gripper_mount_joint, already applied on kuka_joint8/
+    # kuka_hand_joint in kuka.urdf/fabrica_kuka.urdf. render_gripper_closeup.py's muzzle view
+    # confirmed the -45deg hack visually: it put the finger pair on a diagonal instead of square
+    # with the flange's Y axis (see get_kuka_meshes_transforms()) -- removed.
     return 14.55
+
+
+# PDZ Slim belt-driven parallel gripper, 8mm TPU pads. Meshes are authored in the
+# flange frame at the closed pose: +Z out of the flange, +X the opening axis --
+# genuinely different from the KUKA Y-gripper's +Y closing axis / 14.55cm offset
+# above (do not alias the two: the -90deg mount rotation applied in the real/Gazebo
+# URDF compensates for this +X-vs-+Y difference, so the planning-side math must use
+# pdz's own convention, not kuka's, or the compensation double-counts).
+PDZ_JAW_TRAVEL = 3.2 # per-finger stroke
+PDZ_BARE_FINGER_GAP = 2.8 # gap between the bare finger recesses at the closed stop
+
+
+def get_pdz_pad_thickness(gripper_type):
+    return 1.4 if '-14' in gripper_type else 0.8
+
+
+def get_pdz_pad_gap_closed(gripper_type):
+    return PDZ_BARE_FINGER_GAP - 2 * get_pdz_pad_thickness(gripper_type)
+
+
+def get_pdz_grasp_base_offset():
+    # pads end at z=15.05, grip 2mm back from the tip so thin parts lying on the
+    # board can be pinched without the pads reaching under it
+    return 14.85
 
 
 def get_robotiq_85_grasp_base_offset(open_ratio):
@@ -169,6 +195,8 @@ def get_gripper_grasp_base_offset(gripper_type, open_ratio, delta=0.0):
         return get_robotiq_85_grasp_base_offset(open_ratio) + delta
     elif gripper_type == 'robotiq-140':
         return get_robotiq_140_grasp_base_offset(open_ratio) + delta
+    elif gripper_type.startswith('pdz'):
+        return get_pdz_grasp_base_offset() + delta
     else:
         raise NotImplementedError
 
@@ -189,6 +217,11 @@ def get_kuka_basis_directions():
     return [0, 0, -1], [0, 1, 0]
 
 
+def get_pdz_basis_directions():
+    # +X is the opening axis in the mesh frame (see PDZ comment above get_pdz_grasp_base_offset).
+    return [0, 0, -1], [1, 0, 0]
+
+
 def get_robotiq_85_basis_directions():
     return [0, 0, -1], [-1, 0, 0]
 
@@ -206,6 +239,8 @@ def get_gripper_basis_directions(gripper_type):
         return get_robotiq_85_basis_directions()
     elif gripper_type == 'robotiq-140':
         return get_robotiq_140_basis_directions()
+    elif gripper_type.startswith('pdz'):
+        return get_pdz_basis_directions()
     else:
         raise NotImplementedError
 
@@ -250,6 +285,15 @@ def get_robotiq_140_open_ratio(antipodal_points):
         return 1.0 - (np.arccos((antipodal_width / 2 + 0.325 + 2.3 - 1.7901 - 1.27) / 10) - 0.8680) / 0.8757
 
 
+def get_pdz_open_ratio(antipodal_points, gripper_type='pdz'):
+    antipodal_points = np.array(antipodal_points, dtype=float)
+    antipodal_width = np.linalg.norm(antipodal_points[1] - antipodal_points[0])
+    open_ratio = (antipodal_width - get_pdz_pad_gap_closed(gripper_type)) / (2 * PDZ_JAW_TRAVEL)
+    if open_ratio > 1 or open_ratio < 0: # the pads cannot close past the closed gap
+        return None
+    return open_ratio
+
+
 def get_gripper_open_ratio(gripper_type, antipodal_points):
     if gripper_type == 'panda':
         return get_panda_open_ratio(antipodal_points)
@@ -259,6 +303,8 @@ def get_gripper_open_ratio(gripper_type, antipodal_points):
         return get_robotiq_85_open_ratio(antipodal_points)
     elif gripper_type == 'robotiq-140':
         return get_robotiq_140_open_ratio(antipodal_points)
+    elif gripper_type.startswith('pdz'):
+        return get_pdz_open_ratio(antipodal_points, gripper_type)
     else:
         raise NotImplementedError
     
@@ -302,6 +348,14 @@ def get_robotiq_140_finger_states(open_ratio):
     return finger_states
 
 
+def get_pdz_finger_states(open_ratio):
+    extent = PDZ_JAW_TRAVEL * open_ratio
+    return {
+        'pdz_left_finger': [extent],
+        'pdz_right_finger': [extent],
+    }
+
+
 def get_gripper_finger_states(gripper_type, open_ratio, suffix=None):
     if gripper_type == 'panda':
         finger_states = get_panda_finger_states(open_ratio)
@@ -311,6 +365,8 @@ def get_gripper_finger_states(gripper_type, open_ratio, suffix=None):
         finger_states = get_robotiq_85_finger_states(open_ratio)
     elif gripper_type == 'robotiq-140':
         finger_states = get_robotiq_140_finger_states(open_ratio)
+    elif gripper_type.startswith('pdz'):
+        finger_states = get_pdz_finger_states(open_ratio)
     else:
         raise NotImplementedError
     if suffix is not None:
@@ -325,6 +381,8 @@ def get_gripper_base_name(gripper_type, suffix=None):
         name = 'kuka_hand'
     elif gripper_type in ['robotiq-85', 'robotiq-140']:
         name = 'robotiq_base'
+    elif gripper_type.startswith('pdz'):
+        name = 'pdz_base'
     else:
         raise NotImplementedError
     if suffix is not None:
@@ -352,6 +410,10 @@ def get_gripper_hand_names(gripper_type, suffix=None):
                 for link in ['knuckle', 'finger']:
                     name = f'{side_i}_{side_j}_{link}'
                     names.append(f'robotiq_{name}')
+    elif gripper_type.startswith('pdz'):
+        names = ['pdz_base']
+        if '-mech' not in gripper_type:
+            names.append('pdz_d405')
     else:
         raise NotImplementedError
     if suffix is not None:
@@ -363,6 +425,8 @@ def get_gripper_knuckle_names(gripper_type, suffix=None): # NOTE: for avoiding g
     if gripper_type == 'panda':
         names = []
     elif gripper_type == 'kuka':
+        names = []
+    elif gripper_type.startswith('pdz'):
         names = []
     elif gripper_type == 'robotiq-85' or gripper_type == 'robotiq-140':
         names = []
@@ -386,6 +450,8 @@ def get_gripper_finger_names(gripper_type, suffix=None):
         names = ['robotiq_left_inner_finger', 'robotiq_right_inner_finger']
     elif gripper_type == 'robotiq-140':
         names = ['robotiq_left_pad', 'robotiq_right_pad']
+    elif gripper_type.startswith('pdz'):
+        names = ['pdz_left_finger', 'pdz_right_finger']
     else:
         raise NotImplementedError
     if suffix is not None:
@@ -410,6 +476,20 @@ def load_kuka_meshes(asset_folder, visual=False):
     meshes['kuka_hand'] = trimesh.load(os.path.join(asset_folder, 'kuka', dir_name, 'hand.obj'))
     meshes['kuka_leftfinger'] = trimesh.load(os.path.join(asset_folder, 'kuka', dir_name, 'left_finger.obj'))
     meshes['kuka_rightfinger'] = trimesh.load(os.path.join(asset_folder, 'kuka', dir_name, 'right_finger.obj'))
+    return meshes
+
+
+def load_pdz_meshes(asset_folder, visual=False, variant='pdz'):
+    meshes = {}
+    dir_name = 'visual' if visual else 'collision'
+    folder = variant.replace('-', '_')
+    meshes['pdz_base'] = trimesh.load(os.path.join(asset_folder, folder, dir_name, 'base.obj'))
+    meshes['pdz_left_finger'] = trimesh.load(os.path.join(asset_folder, folder, dir_name, 'finger_left.obj'))
+    meshes['pdz_right_finger'] = trimesh.load(os.path.join(asset_folder, folder, dir_name, 'finger_right.obj'))
+    # The D405 is a separate fixed link in the source URDF, so it is not part of
+    # base.obj. Include its flange-frame box only in the complete collision model.
+    if not visual and '-mech' not in variant:
+        meshes['pdz_d405'] = trimesh.load(os.path.join(asset_folder, folder, dir_name, 'd405.obj'))
     return meshes
 
 
@@ -456,6 +536,8 @@ def load_gripper_meshes(gripper_type, asset_folder, has_ft_sensor=False, visual=
         gripper_meshes =  load_robotiq_85_meshes(asset_folder, visual=visual)
     elif gripper_type == 'robotiq-140':
         gripper_meshes =  load_robotiq_140_meshes(asset_folder, visual=visual)
+    elif gripper_type.startswith('pdz'):
+        gripper_meshes = load_pdz_meshes(asset_folder, visual=visual, variant=gripper_type)
     else:
         raise NotImplementedError
     if has_ft_sensor:
@@ -490,15 +572,14 @@ def get_kuka_meshes_transforms(meshes, open_ratio):
     transforms['kuka_leftfinger'] = get_translate_matrix([0, -4 * open_ratio, 0])
     transforms['kuka_rightfinger'] = get_translate_matrix([0, 4 * open_ratio, 0])
 
-    # The merged hand+finger mesh assembly is authored 45deg off from the true gripper_base_link
-    # (flange) frame it's mounted on: remount the whole assembly by rotating -45deg about the
-    # flange's own Z axis (approach axis, so this doesn't touch the -Z approach direction, only
-    # which way the Y closing axis/finger paddles point). Applied last (left-multiplied) so each
-    # mesh's own local open/close translation still happens in its own unrotated local frame first.
-    mount_rotation = get_revolute_matrix('Z', -np.pi / 4)
-    for name in transforms:
-        transforms[name] = mount_rotation @ transforms[name]
+    return transforms
 
+
+def get_pdz_meshes_transforms(meshes, open_ratio):
+    transforms = {k: np.eye(4) for k in meshes.keys()}
+    extent = PDZ_JAW_TRAVEL * open_ratio
+    transforms['pdz_left_finger'] = get_translate_matrix([-extent, 0, 0])
+    transforms['pdz_right_finger'] = get_translate_matrix([extent, 0, 0])
     return transforms
 
 
@@ -569,6 +650,8 @@ def get_gripper_meshes_transforms(gripper_type, meshes, pos, quat, pose, open_ra
         transforms = get_robotiq_85_meshes_transforms(meshes, open_ratio)
     elif gripper_type == 'robotiq-140':
         transforms = get_robotiq_140_meshes_transforms(meshes, open_ratio)
+    elif gripper_type.startswith('pdz'):
+        transforms = get_pdz_meshes_transforms(meshes, open_ratio)
     else:
         raise NotImplementedError
     

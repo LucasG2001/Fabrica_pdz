@@ -1,0 +1,51 @@
+Quickstart: rendering more failure cases for debugging
+
+# activate the env everything below needs
+source ~/miniconda3/etc/profile.d/conda.sh && conda activate fabrica
+
+# 1. re-run grasp generation for an assembly (writes logs/<exp>/<assembly>/grasps.pkl + grasp_stats.txt)
+python planning/run_grasp_arm_gen.py --assembly-dir assets/fabrica/plumbers_block \
+  --log-dir logs/kuka2/plumbers_block --num-proc 12 --max-n-grasp 100 \
+  --arm kuka --gripper kuka --ft-sensor none --ik-regularization 0.1
+
+# 2. gripper-alone mount/orientation sanity check (flange-frame-aligned camera)
+python planning/utils/render_gripper_closeup.py --arm kuka --out-dir output/gripper_closeup
+
+# 3. full arm+gripper+part failure-mode videos (what I just generated) --
+#    script isn't a committed CLI tool, it's the ad-hoc one from this session:
+#    /home/pdzuser/.claude/jobs/aca20f22/tmp/render_failed_grasp_videos.py
+#    -- copy it into planning/utils/ if you want it to persist as a real tool;
+#    it buckets clean candidates by check_grasp_feasible's rejection reason and
+#    renders whichever bucket you pick as an mp4 (rest_q -> candidate pose)
+
+# 4. full pipeline end-to-end (currently still fails at sequence planning)
+bash planning/run_planning.sh kuka2 plumbers_block kuka 
+
+----------------------------------------------------------------------------
+2. The offset value itself — planning/robot/geometry.py, per gripper type:
+# geometry.py:131-132
+def get_panda_grasp_base_offset():
+    return 10.34 + 0.9
+
+# geometry.py:135-154
+def get_kuka_grasp_base_offset():
+    # ... (comment explaining 14.55cm = gripper_tcp_joint offset)
+    return 14.55
+
+# geometry.py:157-158
+def get_robotiq_85_grasp_base_offset(open_ratio):
+    return 3.5 + np.sin(0.9208 + (1 - open_ratio) * 0.8757) * 5.715 + 6.93075 + 0.9
+
+# geometry.py:161-162
+def get_robotiq_140_grasp_base_offset(open_ratio):
+    return 1.5 + 3.8 + np.sin(0.8680 + (1 - open_ratio) * 0.8757) * 10 + 5.4905 + 1.0
+dispatched by get_gripper_grasp_base_offset at geometry.py:165-175. For KUKA it's a literal hardcoded 14.55 (cm) — not read from the URDF at runtime, just a number copied in from kuka_iiwa7_y_gripper.urdf's gripper_tcp_joint offset (0.1455 m).
+
+---------
+
+python planning/run_grasp_arm_gen.py \
+  --assembly-dir assets/fabrica/$ASSEMBLY \
+  --log-dir logs/$EXP_NAME/$ASSEMBLY \
+  --max-n-grasp 100 --arm kuka --gripper kuka --ft-sensor none \
+  --ik-regularization 0.1 --use-graspplanning \
+  --num-proc 1 --verbose

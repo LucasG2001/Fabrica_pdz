@@ -1,0 +1,132 @@
+artifacts:
+  output_root: /home/pdzuser/Grasp_Planning/artifacts/dual_grasp_planning_fixture
+assembly:
+  asset_root: /home/pdzuser/Fabrica/output/graspplanning_fixture_assets
+  mesh_scale: 0.01
+  name: plumbers_block
+  table_contact_tolerance_m: 1.0e-06
+  table_z_assembly_m: 0.0
+grasp_assembly_action:
+  action_name: /grasp_assembly
+  artifact_root: artifacts/dual_grasp_planning
+  debug_aabb_topic: /grasp_assembly/debug_aabbs
+  floor_z_world_m: -0.03
+  frame_id: base_link
+  headless: false
+  holder_robot: left
+  inserter_robot: right
+  maximum_assembly_tilt_deg: 5.0
+  output_root: artifacts/dual_grasp_assembly_actions
+  pose_base_topic: /perception/fp/pose_base/fused/assembly
+  pose_message_type: fp_debug_msgs/msg/DebugPoseItem
+  pose_timeout_s: 40.0
+  position_offset_m:
+  - 0.0
+  - 0.0
+  - 0.0
+  stop_after: inserter_pickup_grasp
+holder_feasibility:
+  geometry_clearance_margin_m: 0.0
+  incoming_path_samples: 21
+  pregrasp_offset_m: 0.05
+  table_clearance_margin_m: 0.002
+pair_planning:
+  adaptive_inserter_shortlist: true
+  axis_bin_deg: 30.0
+  balance_inserter_approach_directions: true
+  balance_inserter_symmetry_transforms: true
+  clearance_score_saturation_m: 0.05
+  clearance_score_weight: 0.1
+  contact_position_bin_m: 0.025
+  exact_pair_clearance_ranking: true
+  geometry_clearance_margin_m: 0.0
+  holder_score_weight: 0.45
+  inserter_score_weight: 0.45
+  matrix_unary_rejections_per_side: 12
+  max_accepted_pairs: 256
+  max_candidates_per_cluster: 5
+  max_collision_diagnostics_per_step: 24
+  max_holder_candidates_per_step: 80
+  max_inserter_candidates_per_step: 512
+  max_pair_checks: 16000
+  max_pairs_per_holder: 4
+  max_pairs_per_inserter: 4
+  max_rejected_pairs: 200
+  path_samples: 21
+  prefer_aabb_clear_inserter_candidates: true
+  retreat_distance_m: 0.05
+  stage3_worker_count: 0
+  table_clearance_margin_m: 0.002
+  transition_symmetry_enabled: true
+  transition_symmetry_geometry_tolerance_m: 0.001
+  transition_symmetry_max_incoming_transforms: 0
+  transition_symmetry_max_partial_assembly_transforms: 0
+planning:
+  antipodal_cosine_threshold: 0.984807753012208
+  contact_approach_offsets_m:
+  - -0.0030833333333333333
+  - 0.0
+  - 0.0030833333333333333
+  contact_lateral_offsets_m:
+  - -0.002916666666666667
+  - 0.0
+  - 0.002916666666666667
+  detailed_finger_contact_gap_m: 0.005
+  gripper_collision_model: kuka_y_gripper
+  max_jaw_width: 0.07
+  max_pair_checks: 40960
+  min_jaw_width: 0.002
+  num_surface_samples: 1024
+  rng_seed: 0
+  roll_angle_step_deg: 15.0
+  stage1_cache_dir: /home/pdzuser/Grasp_Planning/artifacts/dual_grasp_planning_fixture/stage1_cache
+  stage1_cache_enabled: true
+  symmetry_max_transforms: 0
+  symmetry_pickup_enabled: true
+reachability_debug:
+  assembly:
+    position_world_m:
+    - 0.55
+    - 0.0
+    - 0.0
+    yaw_deg: 0.0
+  holder_base:
+    position_world_m:
+    - 0.0
+    - -0.42
+    - 0.0
+    yaw_deg: 0.0
+  inserter_base:
+    position_world_m:
+    - 0.0
+    - 0.42
+    - 0.0
+    yaw_deg: 0.0
+  lock_robot_separation: true
+  robot_separation_y_m: 0.84
+  scoring:
+    approach_weight: 0.15
+    comfort_height_base_m: 0.25
+    comfort_reach_m: 0.55
+    crossing_penalty: 0.25
+    distance_weight: 0.45
+    front_full_m: 0.15
+    front_weight: 0.2
+    front_zero_m: -0.15
+    height_weight: 0.2
+    layout_weight: 0.15
+    maximum_height_base_m: 0.85
+    maximum_reach_m: 0.95
+    minimum_height_base_m: -0.05
+    minimum_reach_m: 0.15
+    noncrossing_weight: 0.3
+    offline_pair_weight: 0.4
+    ownership_margin_m: 0.25
+    ownership_weight: 0.7
+    reachability_weight: 0.45
+    shoulder_offset_base_m:
+    - 0.0
+    - 0.0
+    - 0.34
+    target_mean_weight: 0.4
+    target_min_weight: 0.6

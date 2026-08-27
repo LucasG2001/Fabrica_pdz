@@ -1,0 +1,30 @@
+{
+  "0": {
+    "holder_grasp_id": "g0820",
+    "inserter_grasp_id": "g1603",
+    "case_id": "step_001_part_0__part_0__left_inner_middle__roll_90_yaw_90",
+    "pair_id": "p001_h0820_i0_1603__sym_object_y_bounds_center_order2_step1",
+    "step_id": "step_001_part_0"
+  },
+  "3": {
+    "holder_grasp_id": "g0837",
+    "inserter_grasp_id": "g0360",
+    "case_id": "step_002_part_3__part_3__left_inner_front__upright_yaw_0",
+    "pair_id": "p002_h0837_i3_0360__sym_object_z_bounds_center_order2_step1",
+    "step_id": "step_002_part_3"
+  },
+  "1": {
+    "holder_grasp_id": "g0820",
+    "inserter_grasp_id": "g0285",
+    "case_id": "step_003_part_1__part_1__left_inner_front__upright_yaw_0",
+    "pair_id": "p003_h0820_i1_0285__sym_object_z_bounds_center_order3_step2",
+    "step_id": "step_003_part_1"
+  },
+  "4": {
+    "holder_grasp_id": "g1264",
+    "inserter_grasp_id": "g0325",
+    "case_id": "step_004_part_4__part_4__left_inner_front__upright_yaw_0",
+    "pair_id": "p004_h1264_i4_0325__sym_object_z_bounds_center_order6_step5",
+    "step_id": "step_004_part_4"
+  }
+}
