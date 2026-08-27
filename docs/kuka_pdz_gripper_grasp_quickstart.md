@@ -37,6 +37,12 @@ Wait for `Configured and activated` to appear 3 times (`joint_state_broadcaster`
 `joint_trajectory_controller_lbr_one` + `joint_trajectory_controller_lbr_two`) before doing
 anything else.
 
+> To run the arms under the **Cartesian-impedance controller** instead of position
+> `JointTrajectoryController`s, add `arm_control:=cartesian_impedance` here and follow
+> `docs/kuka_gazebo_cartesian_impedance_quickstart.md` — different controller set (5 spawns),
+> a `compensate_gravity` setting that must match world gravity, and the executor needs a
+> matching `--arm-control cartesian_impedance`.
+
 If Gazebo doesn't come up cleanly, first check for a stale/leftover launch from a previous
 session:
 ```bash

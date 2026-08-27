@@ -205,3 +205,22 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# --- Large binary artifacts (models, trajectories, videos) ---
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.pkl
+*.npy
+*.npz
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.gif
+# keep the README teaser
+!images/teaser.gif
+
+# GitNexus index / parsed-file cache
+.gitnexus/
