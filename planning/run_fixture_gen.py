@@ -16,7 +16,7 @@ from time import time
 
 from assets.load import load_pos_quat_dict
 from assets.transform import get_transform_matrix, get_transform_matrix_quat, mat_to_pos_quat, get_pos_euler_from_transform_matrix
-from planning.robot.geometry import load_part_meshes, load_gripper_meshes, transform_gripper_meshes, get_buffered_meshes
+from planning.robot.geometry import load_part_meshes, load_gripper_meshes, transform_gripper_meshes, get_buffered_meshes, get_gripper_basis_directions
 from planning.robot.workcell import get_assembly_center, get_board_dx, get_fixture_min_y
 from planning.run_seq_plan import SequencePlanner
 from planning.run_seq_opt import SequenceOptimizer
@@ -39,19 +39,31 @@ DELTA_BIN_SIZE = 1 * DX # delta size of bin for rect pack
 DELTA_BUFFER_SIZE = 2.0 # delta size of buffer for part-gripper collision
 
 
-def generate_individual_pose_info(part_cfg_final, sequence, grasps_sequence):
-    
+def generate_individual_pose_info(part_cfg_final, sequence, grasps_sequence, gripper_type):
+
     part_meshes_final = part_cfg_final['mesh']
     pose_info = {}
     sequence_forward = sequence[::-1]
     grasps_sequence_forward = grasps_sequence[::-1]
 
+    # Pickup orientation aligns the grasp's finger-closing axis to the fixture's +X and its
+    # approach axis to -Z. Both directions must come from THIS gripper's basis, not a fixed
+    # literal: grasp.quat is stored gripper-native (util_grasp.get_gripper_pos_quat builds it
+    # from get_gripper_basis_directions(gripper_type)), so applying the historical Panda
+    # literals [0,-1,0] (-l2r) / [0,0,1] (-approach) only works while the l2r basis is [0,1,0].
+    # pdz closes along +X (robotiq-85 along -X), so the literal selected a transverse axis and
+    # planted the part ~90 deg off. -basis reproduces the old values exactly for
+    # panda / kuka / robotiq-140.
+    base_basis, l2r_basis = get_gripper_basis_directions(gripper_type)
+    gripper_l2r_basis = -np.asarray(l2r_basis, dtype=float)
+    gripper_b2f_basis = -np.asarray(base_basis, dtype=float)
+
     for i, ((part_move, part_hold), (grasps_move, grasp_hold)) in enumerate(zip(sequence_forward, grasps_sequence_forward)):
         grasp_move_final = grasps_move[0]
 
         if i == 0: # first step, both arm pick up
-            gripper_l2r_dir = R.from_quat(grasp_hold.quat[[1, 2, 3, 0]]).apply([0, -1, 0])
-            gripper_b2f_dir = R.from_quat(grasp_hold.quat[[1, 2, 3, 0]]).apply([0, 0, 1])
+            gripper_l2r_dir = R.from_quat(grasp_hold.quat[[1, 2, 3, 0]]).apply(gripper_l2r_basis)
+            gripper_b2f_dir = R.from_quat(grasp_hold.quat[[1, 2, 3, 0]]).apply(gripper_b2f_basis)
             target_l2r_dir = np.array([1, 0, 0])
             target_b2f_dir = np.array([0, 0, -1])
             pickup_rot_mat = R.align_vectors([target_l2r_dir, target_b2f_dir], [gripper_l2r_dir, gripper_b2f_dir])[0].as_matrix()
@@ -71,8 +83,8 @@ def generate_individual_pose_info(part_cfg_final, sequence, grasps_sequence):
             }
         
         # move arm pick up
-        gripper_l2r_dir = R.from_quat(grasp_move_final.quat[[1, 2, 3, 0]]).apply([0, -1, 0])
-        gripper_b2f_dir = R.from_quat(grasp_move_final.quat[[1, 2, 3, 0]]).apply([0, 0, 1])
+        gripper_l2r_dir = R.from_quat(grasp_move_final.quat[[1, 2, 3, 0]]).apply(gripper_l2r_basis)
+        gripper_b2f_dir = R.from_quat(grasp_move_final.quat[[1, 2, 3, 0]]).apply(gripper_b2f_basis)
         target_l2r_dir = np.array([1, 0, 0])
         target_b2f_dir = np.array([0, 0, -1])
         pickup_rot_mat = R.align_vectors([target_l2r_dir, target_b2f_dir], [gripper_l2r_dir, gripper_b2f_dir])[0].as_matrix()
@@ -399,7 +411,7 @@ def run_fixture_gen(assembly_dir, log_dir, optimized, seed, render=False):
     t_start = time()
 
     # get part orientation from grasps
-    pose_info_individual = generate_individual_pose_info(part_cfg_final, sequence, grasps_sequence)
+    pose_info_individual = generate_individual_pose_info(part_cfg_final, sequence, grasps_sequence, grasps['gripper'])
 
     bin_size = None
     while True: # 2d packing and make sure collision free with gripper
