@@ -29,14 +29,14 @@ BOTTOM_THICKNESS = 0.5 # bottom thickness of the fixture without mold
 EDGE_THICKNESS = 3.0 # thickness of the fixture edge
 MIN_MOLD_DEPTH = 1.0 # minimum depth of the mold
 MOLD_EDGE_OFFSET_PART = [0.05, 0.05, 0.0] # offset from part edge to mold edge
-MOLD_EDGE_OFFSET_GRIPPER = [0.8, 0.8, 0.4] # offset from gripper edge to mold edge
+MOLD_EDGE_OFFSET_GRIPPER = [1.2, 1.2, 0.9] # offset from gripper edge to mold edge
 PART_BOUNDARY_OFFSET = 0.2 # offset from part boundary to part edge
-PART_GAP = 2.0 # gap between parts
+PART_GAP = 2.5 # gap between parts
 MAX_BIN_SIZE_SINGLE = [8 * DX, 10 * DX] # maximum size of bin for rect pack (one print)
 MAX_BIN_SIZE_DOUBLE = [8 * DX, 20 * DX] # maximum size of bin for rect pack (two prints)
 MAX_BIN_SIZE_BLOCKING = [12 * DX, 20 * DX] # maximum size of bin for rect pack (blocking collision check)
 DELTA_BIN_SIZE = 1 * DX # delta size of bin for rect pack
-DELTA_BUFFER_SIZE = 2.0 # delta size of buffer for part-gripper collision
+DELTA_BUFFER_SIZE = 2.5 # delta size of buffer for part-gripper collision
 
 
 def generate_individual_pose_info(part_cfg_final, sequence, grasps_sequence, gripper_type):
