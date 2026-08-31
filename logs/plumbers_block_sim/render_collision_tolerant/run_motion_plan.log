@@ -1,0 +1,6 @@
+[run_motion_plan] hold switch planner raised AssertionError(); using direct interpolation
+[run_motion_plan] COLLISION-IGNORING direct path: hold arm switch
+EXIT=0 at 08:02:55
+-rw-rw-r-- 1 pdzuser pdzuser   2881 Aug 31 08:02 logs/plumbers_block_sim/commands.pkl
+-rw-rw-r-- 1 pdzuser pdzuser 270188 Aug 31 08:02 logs/plumbers_block_sim/motion.pkl
+1

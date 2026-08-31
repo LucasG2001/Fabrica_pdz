@@ -144,6 +144,30 @@ between `q_start` and `q_goal`. The resulting `motion.pkl` is **not collision-fr
 only for visualising the plan. With all three real patches applied, exactly **one** segment
 (a hold-arm regrasp switch) needed the fallback; everything else planned normally.
 
+#### The one collision-ignoring fallback — exact location (probe-verified)
+
+- **When:** the hold-arm `switch` **after assembly step 2** (forward sequence
+  `[(3,2),(1,2),(0,2),(4,2)]` — so parts 3, 1, 0 are already on the base; only part 4
+  remains). The hold grasp on the **base part 2** changes: `hold grasp per step =
+  [2/938, 2/938, 2/938, 2/1772]` → one regrasp, from grasp id `938` to `1772`, both on
+  part 2, both `open_ratio ≈ 0.438`.
+- **Bodies in contact:** the hold **pdz gripper `pdz_left_finger`** ↔ **part 2 (the base)**.
+  At the grasp width (`open_ratio 0.438`) the pad touches the base (min_dist 0.000 cm,
+  unbuffered collision). At the wider transport width (0.537) there is 0.32 cm real
+  clearance → only a *buffered* (0.5 cm) collision there. All other parts stay clear
+  (min_dist: part 0 2.64, part 3 1.31, part 4 1.67, part 1 8.1 cm).
+- **Why it fails:** identical to Problem 4 but on the hold side — `plan_path_switch`'s
+  collision scene includes part 2 (now at its final/assembled pose), which is exactly the
+  part the gripper is regrasping. `collision_fn` cannot tell "grasping" from "colliding",
+  so the retract sub-routine tries to back out of the intended grasp contact, fails, and
+  `assert not collision_fn_unbuffered(q_goal_active)` fires. The same "exclude the active
+  part from the switch collision scene" fix covers both the move-arm and this hold-arm case.
+- **Severity:** low. Both configs grasp the same part in nearly the same place, so the
+  straight-line fallback is a small wrist re-orientation of the holding arm, not a sweep
+  through anything. ("One fallback" = one path *segment* that could not be planned
+  collision-free; it is not a guarantee the other segments have zero sub-cm buffered grazes
+  at the pickup instants.)
+
 ---
 
 ## 3. Files changed (worktree `worktree-fixture-min-y-shortfix`)
