@@ -27,6 +27,18 @@ from planning.run_seq_plan import SequencePlanner
 from planning.run_seq_opt import SequenceOptimizer
 from planning.config import RETRACT_OPEN_RATIO, OPEN_RATIO_REST, RETRACT_DELTA_FAR
 
+# When MOTION_PLAN_ALLOW_COLLISION is set, a failed / infeasible path segment (planner returns
+# None, or asserts because start/goal is in collision) is replaced by a straight joint-space
+# interpolation between q_start and q_goal instead of aborting. The resulting motion.pkl is NOT
+# collision-free -- it is only for visualising what the plan would look like.
+ALLOW_COLLISION_FALLBACK = bool(os.environ.get('MOTION_PLAN_ALLOW_COLLISION'))
+
+
+def _linear_full_path(q_start, q_goal, n=40):
+    q0 = np.asarray(q_start, dtype=float)
+    q1 = np.asarray(q_goal, dtype=float)
+    return [q0 + (q1 - q0) * t for t in np.linspace(0.0, 1.0, n)]
+
 
 def get_pickup_gripper_pose(grasp, pickup_pose, final_pose, lift=0):
     gripper_final_pose = get_transform_matrix_quat(grasp.pos, grasp.quat)
@@ -35,14 +47,29 @@ def get_pickup_gripper_pose(grasp, pickup_pose, final_pose, lift=0):
     return gripper_pickup_pose
 
 
-def get_pickup_arm_q(motion_planner, grasp, pickup_pose, final_pose, arm_q_init=None, lift=0, has_ft_sensor=False, optimizer=None, regularization=None):
+def get_pickup_arm_q(motion_planner, grasp, pickup_pose, final_pose, arm_q_init=None, lift=0, has_ft_sensor=False, optimizer=None, regularization=None,
+                     collision_still_meshes=None, collision_open_ratio=None, n_restart_collision=30,
+                     arm_chain_other=None, arm_q_other=None, open_ratio_other=None, has_ft_sensor_other=False):
     if arm_q_init is None: arm_q_init = grasp.arm_q
     gripper_pickup_pose = get_pickup_gripper_pose(grasp, pickup_pose, final_pose, lift)
     gripper_pickup_pos, gripper_pickup_quat = mat_to_pos_quat(gripper_pickup_pose)
     gripper_pickup_ori = get_ik_target_orientation(motion_planner.arm_chain, motion_planner.gripper_type, gripper_pickup_quat)
     if has_ft_sensor:
         gripper_pickup_pos = get_ft_pos_from_gripper_pos_quat(motion_planner.gripper_type, gripper_pickup_pos, gripper_pickup_quat)
-    arm_q_pickup = motion_planner.inverse_kinematics(gripper_pickup_pos, gripper_pickup_ori, q_init=arm_q_init, optimizer=optimizer, regularization_parameter=regularization)
+    if collision_still_meshes is not None:
+        # Collision-aware pickup IK: the plain solver below happily returns a wrist config that
+        # intersects the fixture wall or a neighbouring part, which then blows up downstream in
+        # plan_path/plan_path_switch. inverse_kinematics_collision_free re-solves with resampled
+        # seeds until the returned config is collision-free against the fixture + the other
+        # still parts (and the other arm), matching what the path planner will check.
+        if collision_open_ratio is None: collision_open_ratio = grasp.open_ratio
+        arm_q_pickup = motion_planner.inverse_kinematics_collision_free(
+            gripper_pickup_pos, gripper_pickup_ori, collision_still_meshes, collision_open_ratio,
+            q_init=arm_q_init, arm_chain_other=arm_chain_other, arm_q_other=arm_q_other,
+            open_ratio_other=open_ratio_other, has_ft_sensor_other=has_ft_sensor_other,
+            n_restart=n_restart_collision, optimizer=optimizer, regularization_parameter=regularization)
+    else:
+        arm_q_pickup = motion_planner.inverse_kinematics(gripper_pickup_pos, gripper_pickup_ori, q_init=arm_q_init, optimizer=optimizer, regularization_parameter=regularization)
     return arm_q_pickup
 
 
@@ -214,26 +241,45 @@ def run_motion_plan(assembly_dir, log_dir, optimized, seed, verbose=False):
     commands.append(['move', 'gripper', OPEN_RATIO_REST, None, 'init'])
     commands.append(['hold', 'gripper', OPEN_RATIO_REST, None, 'init'])
 
+    # parts that are no longer sitting in the fixture at pickup IK time (base is held at its
+    # final pose after step 0; each move part becomes 'final' once assembled). Used to build the
+    # still-mesh scene for collision-aware pickup IK.
+    placed_parts = {sequence[0][1]}
+
     for step, ((part_move, part_hold), (grasps_move, grasp_hold)) in enumerate(zip(sequence, grasps_sequence)):
-    
+
         # hold (first)
         if step == 0:
-            pickup_q_hold = get_pickup_arm_q(motion_planner_hold, grasp_hold, part_pickup_pose[part_hold], part_final_pose[part_hold], arm_q_init=rest_q_hold, has_ft_sensor=has_ft_sensor['hold'], optimizer='least_squares', regularization=1.0)
+            open_ratio_retract_hold = min(grasp_hold.open_ratio + RETRACT_OPEN_RATIO, 1.0)
+            still_meshes_hold = [fixture_mesh] + [part_meshes_pickup[pid] for pid in part_ids if pid != part_hold]
+            pickup_q_hold = get_pickup_arm_q(motion_planner_hold, grasp_hold, part_pickup_pose[part_hold], part_final_pose[part_hold], arm_q_init=rest_q_hold, has_ft_sensor=has_ft_sensor['hold'], optimizer='least_squares', regularization=1.0,
+                collision_still_meshes=still_meshes_hold, collision_open_ratio=open_ratio_retract_hold,
+                arm_chain_other=arm_chain_move, arm_q_other=rest_q_move, open_ratio_other=OPEN_RATIO_REST, has_ft_sensor_other=has_ft_sensor['move'])
+            if pickup_q_hold is None and ALLOW_COLLISION_FALLBACK:
+                print(f'[run_motion_plan] hold pickup IK failed step {step}; retry without collision meshes')
+                pickup_q_hold = get_pickup_arm_q(motion_planner_hold, grasp_hold, part_pickup_pose[part_hold], part_final_pose[part_hold], arm_q_init=rest_q_hold, has_ft_sensor=has_ft_sensor['hold'], optimizer='least_squares', regularization=1.0)
             if pickup_q_hold is None:
                 raise Exception(f'[run_motion_plan] Failed to solve pickup IK for hold arm in step {step} ({assembly_dir})')
             gripper_pickup_pose[part_hold] = get_pickup_gripper_pose(grasp_hold, part_pickup_pose[part_hold], part_final_pose[part_hold])
-            open_ratio_retract_hold = min(grasp_hold.open_ratio + RETRACT_OPEN_RATIO, 1.0)
             commands.append(['hold', 'gripper', open_ratio_retract_hold, None, 'open'])
             commands.append(['hold', 'arm', (pickup_q_hold, [None, np.array([0, 0, 1.0])]), None, 'transport']) # transport with goal retract
             commands.append(['hold', 'gripper', grasp_hold.open_ratio, None, 'close'])
             commands.append(['hold', 'arm', (grasp_hold.arm_q, [np.array([0, 0, 1.0]), np.array([0, 0, 1.0])]), part_hold, 'transport']) # transport with both retract
-        
+
         # move (assembly)
-        pickup_q_move = get_pickup_arm_q(motion_planner_move, grasps_move[0], part_pickup_pose[part_move], part_final_pose[part_move], arm_q_init=rest_q_move, has_ft_sensor=has_ft_sensor['move'], optimizer='least_squares', regularization=1.0)
+        open_ratio_retract_move = min(grasps_move[0].open_ratio + RETRACT_OPEN_RATIO, 1.0)
+        still_meshes_move = [fixture_mesh] + [
+            (part_meshes_final if pid in placed_parts else part_meshes_pickup)[pid]
+            for pid in part_ids if pid != part_move]
+        pickup_q_move = get_pickup_arm_q(motion_planner_move, grasps_move[0], part_pickup_pose[part_move], part_final_pose[part_move], arm_q_init=rest_q_move, has_ft_sensor=has_ft_sensor['move'], optimizer='least_squares', regularization=1.0,
+            collision_still_meshes=still_meshes_move, collision_open_ratio=open_ratio_retract_move,
+            arm_chain_other=arm_chain_hold, arm_q_other=grasp_hold.arm_q, open_ratio_other=grasp_hold.open_ratio, has_ft_sensor_other=has_ft_sensor['hold'])
+        if pickup_q_move is None and ALLOW_COLLISION_FALLBACK:
+            print(f'[run_motion_plan] move pickup IK failed step {step}; retry without collision meshes')
+            pickup_q_move = get_pickup_arm_q(motion_planner_move, grasps_move[0], part_pickup_pose[part_move], part_final_pose[part_move], arm_q_init=rest_q_move, has_ft_sensor=has_ft_sensor['move'], optimizer='least_squares', regularization=1.0)
         if pickup_q_move is None:
             raise Exception(f'[run_motion_plan] Failed to solve pickup IK for move arm in step {step} ({assembly_dir})')
         gripper_pickup_pose[part_move] = get_pickup_gripper_pose(grasps_move[0], part_pickup_pose[part_move], part_final_pose[part_move])
-        open_ratio_retract_move = min(grasps_move[0].open_ratio + RETRACT_OPEN_RATIO, 1.0)
         commands.append(['move', 'arm', (pickup_q_move, [None, None], open_ratio_retract_move), None, 'switch']) # transport with both retract and open gripper
         commands.append(['move', 'gripper', grasps_move[0].open_ratio, None, 'close'])
         commands.append(['move', 'arm', (grasps_move[-1].arm_q, [np.array([0, 0, 1.0]), get_disassembly_retract_dir(motion_planner_move, grasps_move[0].arm_q, grasps_move[-1].arm_q)]), part_move, 'transport']) # transport with both retract
@@ -258,6 +304,8 @@ def run_motion_plan(assembly_dir, log_dir, optimized, seed, verbose=False):
         if step == len(sequence) - 1:
             commands.append(['move', 'arm', (rest_q_move, [None, None]), None, 'transport']) # transport with start retract
             commands.append(['move', 'gripper', OPEN_RATIO_REST, None, 'close'])
+
+        placed_parts.add(part_move)  # assembled -> now at its final pose for later pickup-IK scenes
 
     # post-process qs in commands
     last_qs = {'move': None, 'hold': None}
@@ -321,24 +369,34 @@ def run_motion_plan(assembly_dir, log_dir, optimized, seed, verbose=False):
                 if retract_start is None: retract_start = get_back_retract_dir(motion_planner, q_start)
                 if retract_goal is None: retract_goal = get_back_retract_dir(motion_planner, q_goal)
 
-                if active_part is not None: # transport with part (pickup -> assembly)
-                    part_meshes_rest = [v for k, v in part_meshes_curr.items() if k != active_part]
-                    path = motion_planner.plan_path_with_grasp(q_start, q_goal,
-                        move_pickup_mesh=part_meshes_pickup[active_part], gripper_pickup_transform=gripper_pickup_pose[active_part], 
-                        still_meshes=part_meshes_rest + [fixture_mesh], open_ratio=open_ratio, 
-                        arm_chain_other=arm_chain_other, arm_q_other=arm_q_other, open_ratio_other=open_ratio_other, has_ft_sensor_other=has_ft_sensor[motion_type_other],
-                        retract_start=retract_start, retract_goal=retract_goal, retract_delta=RETRACT_DELTA_FAR,
-                        max_speed=max_speed[task], verbose=verbose)
+                try:
+                    if active_part is not None: # transport with part (pickup -> assembly)
+                        part_meshes_rest = [v for k, v in part_meshes_curr.items() if k != active_part]
+                        path = motion_planner.plan_path_with_grasp(q_start, q_goal,
+                            move_pickup_mesh=part_meshes_pickup[active_part], gripper_pickup_transform=gripper_pickup_pose[active_part],
+                            still_meshes=part_meshes_rest + [fixture_mesh], open_ratio=open_ratio,
+                            arm_chain_other=arm_chain_other, arm_q_other=arm_q_other, open_ratio_other=open_ratio_other, has_ft_sensor_other=has_ft_sensor[motion_type_other],
+                            retract_start=retract_start, retract_goal=retract_goal, retract_delta=RETRACT_DELTA_FAR,
+                            max_speed=max_speed[task], verbose=verbose)
+                    else: # transport without part
+                        path = motion_planner.plan_path(q_start, q_goal,
+                            part_meshes=list(part_meshes_curr.values()) + [fixture_mesh], open_ratio=open_ratio,
+                            arm_chain_other=arm_chain_other, arm_q_other=arm_q_other, open_ratio_other=open_ratio_other, has_ft_sensor_other=has_ft_sensor[motion_type_other],
+                            retract_start=retract_start, retract_goal=retract_goal, retract_delta=RETRACT_DELTA_FAR,
+                            max_speed=max_speed[task], verbose=verbose)
+                except Exception as e:
+                    if not ALLOW_COLLISION_FALLBACK:
+                        raise
+                    print(f'[run_motion_plan] {motion_type} {task} planner raised {e!r}; using direct interpolation')
+                    path = None
+                if active_part is not None:
                     current_states['parts'][active_part] = 'final'
-                else: # transport without part
-                    path = motion_planner.plan_path(q_start, q_goal,
-                        part_meshes=list(part_meshes_curr.values()) + [fixture_mesh], open_ratio=open_ratio, 
-                        arm_chain_other=arm_chain_other, arm_q_other=arm_q_other, open_ratio_other=open_ratio_other, has_ft_sensor_other=has_ft_sensor[motion_type_other],
-                        retract_start=retract_start, retract_goal=retract_goal, retract_delta=RETRACT_DELTA_FAR,
-                        max_speed=max_speed[task], verbose=verbose)
-                
+
                 if path is None:
-                    raise Exception(f'[run_motion_plan] Failed to plan path for {motion_type} {body_type} in task {task} ({assembly_dir})')
+                    if not ALLOW_COLLISION_FALLBACK:
+                        raise Exception(f'[run_motion_plan] Failed to plan path for {motion_type} {body_type} in task {task} ({assembly_dir})')
+                    print(f'[run_motion_plan] COLLISION-IGNORING direct path: {motion_type} {body_type} {task}')
+                    path = _linear_full_path(q_start, q_goal)
                 paths.append([motion_type, body_type, path, active_part, task])
                 current_states[motion_type][body_type] = q_goal
 
@@ -349,13 +407,22 @@ def run_motion_plan(assembly_dir, log_dir, optimized, seed, verbose=False):
                 if retract_goal is None: retract_goal = get_back_retract_dir(motion_planner, q_goal)
 
                 # TODO: update
-                path1, path2 = motion_planner.plan_path_switch(q_start, q_goal,
-                        part_meshes=list(part_meshes_curr.values()) + [fixture_mesh], open_ratio=open_ratio, open_ratio_next=open_ratio_next,
-                        arm_chain_other=arm_chain_other, arm_q_other=arm_q_other, open_ratio_other=open_ratio_other, has_ft_sensor_other=has_ft_sensor[motion_type_other],
-                        retract_start=retract_start, retract_goal=retract_goal, retract_delta=RETRACT_DELTA_FAR,
-                        max_speed=max_speed[task], verbose=verbose)
+                try:
+                    path1, path2 = motion_planner.plan_path_switch(q_start, q_goal,
+                            part_meshes=list(part_meshes_curr.values()) + [fixture_mesh], open_ratio=open_ratio, open_ratio_next=open_ratio_next,
+                            arm_chain_other=arm_chain_other, arm_q_other=arm_q_other, open_ratio_other=open_ratio_other, has_ft_sensor_other=has_ft_sensor[motion_type_other],
+                            retract_start=retract_start, retract_goal=retract_goal, retract_delta=RETRACT_DELTA_FAR,
+                            max_speed=max_speed[task], verbose=verbose)
+                except Exception as e:
+                    if not ALLOW_COLLISION_FALLBACK:
+                        raise
+                    print(f'[run_motion_plan] {motion_type} switch planner raised {e!r}; using direct interpolation')
+                    path1, path2 = None, None
                 if None in [path1, path2]:
-                    raise Exception(f'[run_motion_plan] Failed to plan path for {motion_type} {body_type} in task {task} ({assembly_dir})')
+                    if not ALLOW_COLLISION_FALLBACK:
+                        raise Exception(f'[run_motion_plan] Failed to plan path for {motion_type} {body_type} in task {task} ({assembly_dir})')
+                    print(f'[run_motion_plan] COLLISION-IGNORING direct path: {motion_type} {body_type} {task}')
+                    path1, path2 = _linear_full_path(q_start, q_goal), []
                 if open_ratio == open_ratio_next:
                     paths.append([motion_type, 'arm', path1 + path2, None, task])
                 else:
@@ -369,10 +436,19 @@ def run_motion_plan(assembly_dir, log_dir, optimized, seed, verbose=False):
 
             elif task == 'assembly':
                 q_goal = value
-                path = motion_planner.plan_path_straight(q_start, q_goal, open_ratio, max_speed=max_speed[task], sanity_check=task != 'assembly', verbose=verbose) # straight line path, assume no collision
-            
+                try:
+                    path = motion_planner.plan_path_straight(q_start, q_goal, open_ratio, max_speed=max_speed[task], sanity_check=task != 'assembly', verbose=verbose) # straight line path, assume no collision
+                except Exception as e:
+                    if not ALLOW_COLLISION_FALLBACK:
+                        raise
+                    print(f'[run_motion_plan] {motion_type} assembly planner raised {e!r}; using direct interpolation')
+                    path = None
+
                 if path is None:
-                    raise Exception(f'[run_motion_plan] Failed to plan path for {motion_type} {body_type} in task {task} ({assembly_dir})')
+                    if not ALLOW_COLLISION_FALLBACK:
+                        raise Exception(f'[run_motion_plan] Failed to plan path for {motion_type} {body_type} in task {task} ({assembly_dir})')
+                    print(f'[run_motion_plan] COLLISION-IGNORING direct path: {motion_type} {body_type} {task}')
+                    path = _linear_full_path(q_start, q_goal)
                 paths.append([motion_type, body_type, path, active_part, task])
                 current_states[motion_type][body_type] = q_goal
 
