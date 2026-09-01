@@ -32,7 +32,11 @@ BOTTOM_THICKNESS = 0.5 # bottom thickness of the fixture without mold
 EDGE_THICKNESS = 3.0 # thickness of the fixture edge
 MIN_MOLD_DEPTH = 1.0 # minimum depth of the mold
 MOLD_EDGE_OFFSET_PART = [0.05, 0.05, 0.0] # offset from part edge to mold edge
-MOLD_EDGE_OFFSET_GRIPPER = [1.2, 1.2, 0.9] # offset from gripper edge to mold edge
+MOLD_EDGE_OFFSET_GRIPPER = [1.6, 1.6, 1.1] # offset from gripper edge to mold edge
+# 2026-09-01: bumped [1.2,1.2,0.9] -> [1.6,1.6,1.1]. The plumbers_block motion plan grazed the
+# fixture pocket walls (within the 0.5 cm planner buffer) on the base-part + part-3 pickup /
+# transport segments. Wider gripper relief per pocket; the repack (DELTA_BUFFER_SIZE) loop
+# absorbs any resulting pocket overlap at the cost of a slightly larger board.
 PART_BOUNDARY_OFFSET = 0.2 # offset from part boundary to part edge
 PART_GAP = 2.5 # gap between parts
 MAX_BIN_SIZE_SINGLE = [8 * DX, 10 * DX] # maximum size of bin for rect pack (one print)
@@ -269,7 +273,7 @@ def generate_pickup_meshes(part_cfg_final, sequence, grasps_sequence, gripper_ty
             gripper_pickup_mat_hold = part_pickup_mat_hold @ gripper_final_mat_hold
             gripper_hold_pickup_pos, gripper_hold_pickup_quat = mat_to_pos_quat(gripper_pickup_mat_hold)
             gripper_meshes_hold_tight = transform_gripper_meshes(gripper_type, gripper_meshes, gripper_hold_pickup_pos, gripper_hold_pickup_quat, np.eye(4), grasp_hold.open_ratio - 0.05)
-            gripper_meshes_hold_loose = transform_gripper_meshes(gripper_type, gripper_meshes, gripper_hold_pickup_pos, gripper_hold_pickup_quat, np.eye(4), grasp_hold.open_ratio + 0.15)
+            gripper_meshes_hold_loose = transform_gripper_meshes(gripper_type, gripper_meshes, gripper_hold_pickup_pos, gripper_hold_pickup_quat, np.eye(4), grasp_hold.open_ratio + 0.25)
             gripper_meshes_pickup[part_hold] = trimesh.boolean.union([get_swept_mesh(gripper_meshes_hold_tight[gripper_part], gripper_meshes_hold_loose[gripper_part]) for gripper_part in gripper_meshes_hold_tight.keys()])
 
         gripper_final_mat_move = get_transform_matrix_quat(grasp_move_final.pos, grasp_move_final.quat)
@@ -277,7 +281,9 @@ def generate_pickup_meshes(part_cfg_final, sequence, grasps_sequence, gripper_ty
         gripper_pickup_mat_move = part_pickup_mat_move @ gripper_final_mat_move
         gripper_move_pickup_pos, gripper_move_pickup_quat = mat_to_pos_quat(gripper_pickup_mat_move)
         gripper_meshes_move_tight = transform_gripper_meshes(gripper_type, gripper_meshes, gripper_move_pickup_pos, gripper_move_pickup_quat, np.eye(4), grasp_move_final.open_ratio - 0.05)
-        gripper_meshes_move_loose = transform_gripper_meshes(gripper_type, gripper_meshes, gripper_move_pickup_pos, gripper_move_pickup_quat, np.eye(4), grasp_move_final.open_ratio + 0.15)
+        # 2026-09-01: loose-side sweep delta +0.15 -> +0.25, so the carved relief accommodates
+        # more finger travel (pairs with the MOLD_EDGE_OFFSET_GRIPPER bump above).
+        gripper_meshes_move_loose = transform_gripper_meshes(gripper_type, gripper_meshes, gripper_move_pickup_pos, gripper_move_pickup_quat, np.eye(4), grasp_move_final.open_ratio + 0.25)
         gripper_meshes_pickup[part_move] = trimesh.boolean.union([get_swept_mesh(gripper_meshes_move_tight[gripper_part], gripper_meshes_move_loose[gripper_part]) for gripper_part in gripper_meshes_move_tight.keys()])
 
     return part_meshes_pickup, gripper_meshes_pickup

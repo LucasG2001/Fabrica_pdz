@@ -215,10 +215,16 @@ def get_fixture_min_y(arm_type):
         #      path planning -- past the reach/collision wall.
         # -55: pickup IK all solves, but move part-3 transport comes back collision:True and
         #      move part-0 switch's start config is in collision with no RRT escape (hang).
-        # -52: the shortfix value -- every pickup IK solves, the only residual collision is a
-        #      hold-arm regrasp switch, which the plan_path_switch active-part-exclusion fix
-        #      in run_motion_plan.py targets directly.
-        return -52.0
+        # -52: the shortfix value -- every pickup IK solves; residual buffer-margin grazes on
+        #      the base + part-3 pickup/transport and the holder regrasp switch.
+        #
+        # 2026-09-01: -52 -> -47.5. Pulls the fixture ~4-5 cm in so part 3 (the farthest
+        # pickup) sits ~55 cm from the base instead of ~62, well inside iiwa7 reach, easing the
+        # tight part-3 segments. -47.5 is also chosen so the slab screw-hole Y lattice
+        # (min_fixture_y + {2.5, 7.5, 12.5, 17.5}, see _slab_hole_lattice in run_fixture_gen.py
+        # with a 20 cm footprint) lands on a clean 5 cm grid: y in {-45, -40, -35, -30}.
+        # Paired with the wider MOLD_EDGE_OFFSET_GRIPPER / retract deltas / planner retry loop.
+        return -47.5
     elif arm_type == 'ur5e':
         return 6 * dx
     else:

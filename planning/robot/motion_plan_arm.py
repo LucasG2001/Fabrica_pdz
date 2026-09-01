@@ -499,25 +499,39 @@ class ArmMotionPlanner: # NOTE: all input/output q is full unless specified acti
         else:
             collision_fn_new = collision_fn
         
+        # RRT + smoothing, with retry-on-graze. rrt_connect / smooth_path can return a path
+        # that still trips collision_fn_new -- usually a within-buffer graze in a tight scene.
+        # The old code printed the flag and returned that path unchanged. Instead, re-plan up
+        # to N_REPLAN_TRIES times with a fresh tree and a larger RRT / smoothing budget, and
+        # keep the first collision-free result (else the best / last). Attempt 0 keeps the
+        # original budget, so a segment that plans clean first try costs exactly as before.
+        # rrt_star line kept for reference:
         # path = rrt_star(q_start_active, q_goal_active, distance_fn, sample_fn, extend_fn, collision_fn_new, radius=5.0, max_iterations=10, informed=False, early_terminate=True, verbose=verbose)
-        path = rrt_connect(q_start_active, q_goal_active, distance_fn, sample_fn, extend_fn, collision_fn_new, max_iterations=1000)
+        N_REPLAN_TRIES = 3
+        path, in_collision, n_attempt = None, True, 0
+        for attempt in range(N_REPLAN_TRIES):
+            n_attempt = attempt + 1
+            rrt_iters = 1000 + 1500 * attempt             # 1000, 2500, 4000
+            smooth_iters = 1000 + 500 * attempt           # 1000, 1500, 2000
+            smooth_time = 120 + 60 * attempt              # 120, 180, 240 s
+            cand = rrt_connect(q_start_active, q_goal_active, distance_fn, sample_fn, extend_fn, collision_fn_new, max_iterations=rrt_iters)
+            if cand is None:
+                continue
+            cand = smooth_path(cand, extend_fn, collision_fn_new, distance_fn, cost_fn=None, sample_fn=sample_fn, max_iterations=smooth_iters, max_time=smooth_time, tolerance=1e-5)
+            cand.insert(0, q_start_active)
+            cand_in_collision = any(collision_fn_new(q) for q in cand)
+            if path is None or (in_collision and not cand_in_collision):
+                path, in_collision = cand, cand_in_collision
+            if not in_collision:
+                break
+
         if path is None:
             if verbose:
                 self.stamp.print('[plan_path_with_grasp] failed to plan path')
                 self.visualize_meshes(q_start, open_ratio, move_pickup_mesh, gripper_pickup_transform, still_meshes, arm_chain_other, arm_q_other, open_ratio_other, has_ft_sensor_other, buffered=True)
                 self.visualize_meshes(q_goal, open_ratio, move_pickup_mesh, gripper_pickup_transform, still_meshes, arm_chain_other, arm_q_other, open_ratio_other, has_ft_sensor_other, buffered=True)
             return None
-        if verbose: self.stamp.print(f'[plan_path_with_grasp] path planned (len: {len(path)})')
-        
-        path = smooth_path(path, extend_fn, collision_fn_new, distance_fn, cost_fn=None, sample_fn=sample_fn, max_iterations=1000, max_time=120, tolerance=1e-5)
-        path.insert(0, q_start_active)
-
-        if verbose: self.stamp.print(f'[plan_path_with_grasp] path smoothed (len: {len(path)})')
-
-        in_collision = False
-        for q in path:
-            if collision_fn_new(q):
-                in_collision = True
+        if verbose: self.stamp.print(f'[plan_path_with_grasp] path planned & smoothed (len: {len(path)}, attempts: {n_attempt}, in_collision: {in_collision})')
 
         if len(path_start_retract) > 0:
             path_start_retract = interpolate_arm_path(self.arm_type, path_start_retract, distance_fn, max_lin_speed=max_speed / 3).tolist()
