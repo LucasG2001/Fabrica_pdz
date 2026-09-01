@@ -370,7 +370,86 @@ surviving ground truth for the fixture; the base pose is a dated inference.
 
 ---
 
-## 9. Status / next steps
+## 9. Experiment — push the ArUco fixture out + fix the switch schedule (2026-09-01)
+
+Branch commit `9b09614`. Goal: a collision-free `plumbers_block` plan with the **ArUco**
+fixture, KUKA bases at **y = 10** (re-verified: every grasp in `grasps.pkl` has
+`grasp.arm_pos = (±42, 10, 2.5)` — hold and move, all 5 parts), fixture pushed as far from
+the robots as reach allows.
+
+### 9.1 `get_fixture_min_y('kuka')` sweep (base y=10, `--markers aruco`)
+
+| value | fixture footprint y | outcome |
+|---|---|---|
+| **−60** | [−60, −40] | move-arm **pickup IK fails at step 2** (part 0 ≈ 67 cm from the base) — before any path planning. No plan. |
+| **−55** | [−55, −35] | all pickup IK solves; `move part-3 transport` → `collision: True`; `move part-0 switch` **start config buffered-in-collision, RRT never escapes** → 2000 s timeout. No plan. |
+| **−52** | [−52, −32] | the value the plan **builds** at. (Same as the shortfix.) |
+
+So `min_fixture_y ≤ −55` is past the reach/collision wall for this grasp set + arm
+placement; −52 is the practical maximum. "65 cm total from a base at y=10" (−55) does not
+build.
+
+### 9.2 Two schedule fixes in `run_motion_plan.py` (both required)
+
+**A — `plan_path_switch` collision scene excludes the approached part.** The switch drives
+the open, reduced-`open_ratio` gripper right onto the part it is about to grasp; keeping
+that part in `plan_path_switch`'s `part_meshes` makes its own goal / retract-IK checks fail
+on the *intended* contact (`assert not collision_fn_unbuffered(...)` → the hard
+`AssertionError` aborts seen in §1). The `switch` command now carries the approached part
+id in its `active_part` slot (was `None`) and the handler drops it from the scene —
+mirroring the collision-aware pickup IK (`get_pickup_arm_q`). Neighbours + fixture + the
+other arm stay in.
+
+**B — inserter retract between handoffs (`arm_type == 'kuka'` only).** The committed
+schedule retracts the move arm to `rest_q` **only on the last step**, leaving it parked at
+its assembly pose. `plan_path_switch` then plans the holder regrasp against it
+(holder↔inserter collision — the original report), and the next move switch starts from a
+config grazing the growing sub-assembly (`start is in collision` → RRT hang). Fix: emit
+`move arm → rest_q` after **every** insert, *before* the holder switch — the 2026-08-21
+reference plan's schedule. kuka-gated so the validated Panda path is untouched.
+
+### 9.3 Result at −52 + A + B
+
+Plan **builds end-to-end** — `PYEXIT=0`, `motion.pkl` + `commands.pkl` written, **no hard
+aborts**, and the `move part-0 switch` that hung indefinitely with either fix alone now
+plans clean.
+
+**Not fully collision-free.** 8 of ~24 arm segments still flag `collision: True` — the path
+comes within the 0.5 cm motion-planner safety buffer at some waypoint (buffered checker;
+not necessarily geometric interpenetration, and the planner returns the path without
+retry):
+
+| # | segment | note |
+|---|---|---|
+| 1 | `hold` → base-part pickup approach | tight against the fixture pocket wall |
+| 2 | `hold` base pickup → assembly (carrying base) | " |
+| 3 | `move part-3 switch` (approach) | part 3 = farthest part, arm fully extended |
+| 4 | `move part-3` pickup → assembly (carrying part 3) | " |
+| 5 | `move → rest` retract after part 1 (new, fix B) | backing out past the sub-assembly |
+| 6 | **`hold` base-regrasp switch after part 0** | the §1 segment — no longer a hard abort (fix A), still grazes |
+| 7 | `move → rest` retract after part 4 (new, fix B) | " |
+| 8 | `hold → rest` final retract | " |
+
+Parts 1, 0, 4 handoffs are all clean with margin. The residual tight segments cluster on
+the base part (inherently near the fixture wall), part 3 (reach-limited), and the
+holder regrasp + retracts.
+
+### 9.4 Levers not yet tried (to close the last 8)
+
+- Widen `MOLD_EDGE_OFFSET_GRIPPER` (or the swept-gripper open-ratio range) in
+  `run_fixture_gen.py` → more pocket clearance for segments 1–4.
+- Raise `RETRACT_DELTA_FAR` / the retract deltas so the retract segments clear the
+  sub-assembly by more than the buffer.
+- Regenerate `grasps.pkl` with clearance-aware candidates for the base and part 3.
+- Relax the 0.5 cm motion-planner buffer only where it is provably over-conservative.
+- A real synchronised dual-arm **unbuffered** validator on `motion.pkl` to confirm which of
+  the 8 (if any) are true interpenetrations vs. sub-buffer grazes — the repo has no such
+  validator today (`debug_movehold_collision_headless.py` checks `grasps.pkl` candidates,
+  not `motion.pkl`).
+
+---
+
+## 10. Status / next steps
 
 - [x] Confirmed the sim collision is holder↔inserter during the part-0 (`pb_pipe`) holder
       regrasp `switch`, produced by the `MOTION_PLAN_ALLOW_COLLISION` straight-line
