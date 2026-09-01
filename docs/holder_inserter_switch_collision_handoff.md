@@ -449,7 +449,54 @@ holder regrasp + retracts.
 
 ---
 
-## 10. Status / next steps
+## 10. Tuning pass — 8 grazes → 1 (2026-09-01, commit `5f83700`)
+
+Applied all of §9.4 plus a fixture reposition. `logs/plumbers_block_y10_min475`, base y=10,
+`--markers aruco`.
+
+| Change | File | From → To |
+|---|---|---|
+| Pocket gripper relief | `run_fixture_gen.py` | `MOLD_EDGE_OFFSET_GRIPPER [1.2,1.2,0.9]` → `[1.6,1.6,1.1]` |
+| Swept-gripper open-ratio | `run_fixture_gen.py` | loose delta `+0.15` → `+0.25` (hold + move) |
+| Fixture position | `workcell.py` | `get_fixture_min_y('kuka') -52` → **`-47.5`** |
+| Retract back-off | `config.py` | `RETRACT_DELTA_FAR 5.0` → `9.0` |
+| Planner retry-on-graze | `motion_plan_arm.py` | `plan_path_with_grasp`: up to 3 attempts (RRT 1000/2500/4000, smooth 120/180/240 s), keep first collision-free |
+
+`-47.5` also lands the slab screw-hole Y lattice (`min_fixture_y + {2.5,7.5,12.5,17.5}`,
+20 cm footprint) on a clean 5 cm grid — **side holes at y = -45 / -30** — and pulls part 3
+(the farthest pickup) from ~62 cm to ~55 cm from the base.
+
+**Result: `PYEXIT=0`, `motion.pkl` written, ~4.5 min. 7 of the 8 grazes gone.**
+
+| segment | before | after |
+|---|---|---|
+| `hold` → base-pickup approach | graze | **graze — `in_collision:True` across all 3 retries** |
+| `hold` base pickup → assembly | graze | clean (retry attempt 2) |
+| `move part-3 switch` | graze | clean (first try — wider pockets + closer fixture) |
+| `move part-3` pickup → assembly | graze | clean (first try) |
+| `move → rest` after part 1 | graze | clean (retry attempt 2) |
+| `hold` base-regrasp switch (§1 segment) | graze / hard-abort | **clean (retry attempt 2)** |
+| `move → rest` after part 4 | graze | clean (retry attempt 2) |
+| `hold → rest` final retract | graze | clean (first try) |
+
+Also cleared (were `collision: True` at `-52`): `move part-1 transport`, `move part-0 switch`
++ transport. The retry loop did the heavy lifting — 6 segments succeeded on attempt 2.
+
+### The one remaining graze
+
+`hold arm transport`, `rest_q → pickup_q_hold` (holder's first move, to grasp the base part
+in the fixture). `in_collision: True` on all 3 fresh RRT trees → the corridor is structurally
+within 0.5 cm of something. **The endpoints are clean** — `pickup_q_hold` itself is
+buffer-clear (the transport *out* of the same pocket is clean), so it is a mid-path graze,
+most likely the descent past the fixture rim or the move arm parked at `rest_q`. Options:
+- Insert an explicit intermediate waypoint (approach the pocket from directly above).
+- Widen just the base-part pocket further (it is the largest part).
+- Run the unbuffered `motion.pkl` validator (still TODO) to confirm it is a sub-5 mm graze
+  that is acceptable for sim / soft-contact hardware rather than a real overlap.
+
+---
+
+## 11. Status / next steps
 
 - [x] Confirmed the sim collision is holder↔inserter during the part-0 (`pb_pipe`) holder
       regrasp `switch`, produced by the `MOTION_PLAN_ALLOW_COLLISION` straight-line
