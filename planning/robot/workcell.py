@@ -203,6 +203,21 @@ def get_fixture_min_y(arm_type):
         # the assembly at y=-15); every pickup IK then solves, and run_motion_plan's pickup IK
         # is made collision-aware (inverse_kinematics_collision_free) so the config it returns is
         # actually free of the fixture / neighbouring parts.
+        #
+        # EXPERIMENT (2026-09-01): -52 -> -60. KUKA bases stay at y=10 (where every grasp in
+        # grasps.pkl was solved -- grasp.arm_pos = (±42, 10, 2.5)). -60 puts the fixture
+        # footprint at y in [-60, -40], i.e. its far edge ~70 cm from the base and its near
+        # edge ~50 cm, keeping the whole fixture inside iiwa7 reach while pushing it as far
+        # from the assembly (y=-15) / the other arm as the reach budget allows. Regenerate
+        # fixture (--markers aruco) + plan and check for a collision-free motion.pkl.
+        #
+        # -60: move-arm pickup IK fails at step 2 (part 0, ~67 cm from the base) before any
+        #      path planning -- past the reach/collision wall.
+        # -55: pickup IK all solves, but move part-3 transport comes back collision:True and
+        #      move part-0 switch's start config is in collision with no RRT escape (hang).
+        # -52: the shortfix value -- every pickup IK solves, the only residual collision is a
+        #      hold-arm regrasp switch, which the plan_path_switch active-part-exclusion fix
+        #      in run_motion_plan.py targets directly.
         return -52.0
     elif arm_type == 'ur5e':
         return 6 * dx

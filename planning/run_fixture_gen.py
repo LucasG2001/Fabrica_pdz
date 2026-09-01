@@ -20,7 +20,10 @@ from planning.robot.geometry import load_part_meshes, load_gripper_meshes, trans
 from planning.robot.workcell import get_assembly_center, get_board_dx, get_fixture_min_y
 from planning.run_seq_plan import SequencePlanner
 from planning.run_seq_opt import SequenceOptimizer
-from planning.utils.fixture_countersunk import generate_countersunk_pad
+from planning.utils.fixture_countersunk import (
+    generate_countersunk_pad, generate_countersunk_hole,
+    PAD_DIAMETER, COUNTERSUNK_DIAMETER, HOLE_DIAMETER)
+from planning.utils.fixture_markers import add_aruco_markers_to_fixture, _section_polygon
 
 
 # fixture board parameters
@@ -37,6 +40,36 @@ MAX_BIN_SIZE_DOUBLE = [8 * DX, 20 * DX] # maximum size of bin for rect pack (two
 MAX_BIN_SIZE_BLOCKING = [12 * DX, 20 * DX] # maximum size of bin for rect pack (blocking collision check)
 DELTA_BIN_SIZE = 1 * DX # delta size of bin for rect pack
 DELTA_BUFFER_SIZE = 2.5 # delta size of buffer for part-gripper collision
+
+# --- bottom-plate lightening (only the z <= BOTTOM_THICKNESS slab layer; never touches the
+#     mold islands above it, the fixture bounding box, the pickup poses, or the markers) ---
+LIGHTEN_BOTTOM = False       # OFF by default: the frame+beds+ribs cut ~15 % of the material
+                            # but the extra perimeters / travel moves make it print SLOWER.
+                            # True -> lighten the slab (see the FLOOR_* / MIN_CUTOUT_AREA knobs)
+FLOOR_FRAME_W = 0.6          # width of the retained perimeter rail, cm (0 -> no rail)
+FLOOR_POCKET_FLANGE = 0.5    # slab material kept around each carved pocket, cm
+FLOOR_RIB_W = 0.6           # width of the ribs tying pockets / pads / rail together, cm
+FLOOR_MARKER_MARGIN = 0.6   # slab bed kept around the ArUco marker footprint, cm
+FLOOR_PAD_MARGIN = 0.5      # slab kept around each countersunk pad centre, cm
+MIN_CUTOUT_AREA = 4.0      # only open a bottom-slab window whose footprint exceeds this,
+                          # cm^2 (smaller cut-outs are left solid; many tiny holes just add
+                          # perimeters + travel moves and slow the print). CLI: --min-cutout-area
+
+# --- mounting screw holes ---
+MOUNT_STYLE = 'slab'      # 'slab':  countersunk holes drilled straight into the solid bottom
+                          #          slab on a SCREW_PITCH grid, clear of the pockets + ArUco
+                          #          tiles, BEFORE the lightening (which then keeps a disc of
+                          #          slab around each). Envelope unchanged -> body stays small.
+                          # 'ears':  holes on tabs projecting from the -X/+X/+Y edges; grows
+                          #          the XY envelope outward (bigger print).
+                          # 'corners': legacy 4 in-slab pads at the raw board corners.
+SCREW_PITCH = 5.0         # mounting hole-to-hole spacing, cm (grid pitch / ear-edge pitch)
+HOLE_EDGE_INSET = 1.1     # 'slab': keep a drilled hole centre this far in from the slab edge, cm
+HOLE_ISLAND_CLR = 1.0     # 'slab': ... and this far from a carved pocket, cm
+HOLE_MARKER_CLR = 0.7     # 'slab': ... and this far from an ArUco marker tile, cm
+EAR_STICKOUT = 2.5        # 'ears': ear hole-centre distance past the body edge, cm
+EAR_HALF_W = 1.4         # 'ears': half the ear-tab width; also hole-to-tip material, cm
+EAR_MARGIN = 1.0         # 'ears': min gap from an ear hole to the end of its edge, cm
 
 
 def generate_individual_pose_info(part_cfg_final, sequence, grasps_sequence, gripper_type):
@@ -356,10 +389,286 @@ def add_countersunk_pads_to_fixture(fixture_mesh, min_fixture_y):
         pad_mesh.apply_translation([pad_center[0], pad_center[1], 0.0])
         pad_meshes.append(pad_mesh)
     fixture_mesh = trimesh.boolean.union([fixture_mesh] + pad_meshes)
-    return fixture_mesh
+    return fixture_mesh, pad_centers
 
 
-def run_fixture_gen(assembly_dir, log_dir, optimized, seed, render=False):
+def widen_fixture_rim_for_markers(fixture_mesh, extend=None):
+    """Union a plain slab-thick band onto the -X / +X edges so the ArUco perimeter strips
+    have room. In 'corners' mode the four countersunk pads widened the footprint by
+    ``DX/2 + PAD_DIAMETER/2`` per side as a side effect; 'ears' mode has no pads, so do it
+    explicitly here (same amount -> identical marker strip width). No holes, slab layer
+    only -> pockets / Z height / plan untouched."""
+    if extend is None:
+        extend = DX / 2 + PAD_DIAMETER / 2
+    b = fixture_mesh.bounds
+    bands = [
+        trimesh.creation.box(bounds=[[b[0][0] - extend, b[0][1], 0.0],
+                                     [b[0][0] + 1e-3, b[1][1], BOTTOM_THICKNESS]]),
+        trimesh.creation.box(bounds=[[b[1][0] - 1e-3, b[0][1], 0.0],
+                                     [b[1][0] + extend, b[1][1], BOTTOM_THICKNESS]]),
+    ]
+    return trimesh.boolean.union([fixture_mesh] + bands, engine='manifold', check_volume=False)
+
+
+def _slab_hole_lattice(bounds):
+    """The SCREW_PITCH lattice of candidate hole centres, centred in the slab footprint and
+    symmetric, with a half-pitch margin to the edges. Returns (xs, ys)."""
+    (x_lo, y_lo), (x_hi, y_hi) = bounds[0][:2], bounds[1][:2]
+
+    def ticks(lo, hi):
+        n = int((hi - lo - SCREW_PITCH) // SCREW_PITCH) + 1
+        start = 0.5 * (lo + hi) - 0.5 * (n - 1) * SCREW_PITCH
+        return [start + k * SCREW_PITCH for k in range(max(n, 1))]
+
+    return ticks(x_lo, x_hi), ticks(y_lo, y_hi)
+
+
+def slab_hole_corners(fixture_mesh):
+    """The four outer lattice points — the reliable clamp positions. Passed to the ArUco
+    step as keep-outs before the marker rows are placed."""
+    xs, ys = _slab_hole_lattice(fixture_mesh.bounds)
+    return [(xs[0], ys[0]), (xs[-1], ys[0]), (xs[0], ys[-1]), (xs[-1], ys[-1])]
+
+
+def plan_slab_screw_holes(fixture_mesh, markers_meta, slab_top_z):
+    """SCREW_PITCH-grid countersunk-hole centres drilled into the solid bottom slab, kept
+    ``HOLE_EDGE_INSET`` from the slab edge, ``HOLE_ISLAND_CLR`` from any carved pocket and
+    ``HOLE_MARKER_CLR`` from any ArUco tile. The four outer points (corners) are forced in
+    even if a clearance is marginally violated; the rest are opportunistic."""
+    from shapely.geometry import box as _box, Point
+    from shapely.ops import unary_union
+
+    slab = _section_polygon(fixture_mesh, slab_top_z - 0.10)
+    island = _section_polygon(fixture_mesh, slab_top_z + 0.15)
+    if slab is None:
+        return []
+    free = slab.buffer(-HOLE_EDGE_INSET)
+    if island is not None:
+        free = free.difference(island.buffer(HOLE_ISLAND_CLR))
+    tiles = [_box(min(c[0] for c in mk['corners']), min(c[1] for c in mk['corners']),
+                  max(c[0] for c in mk['corners']), max(c[1] for c in mk['corners']))
+             for mk in (markers_meta or {}).get('markers', [])]
+    if tiles:
+        free = free.difference(unary_union(tiles).buffer(HOLE_MARKER_CLR))
+
+    xs, ys = _slab_hole_lattice(fixture_mesh.bounds)
+    corners = {(xs[0], ys[0]), (xs[-1], ys[0]), (xs[0], ys[-1]), (xs[-1], ys[-1])}
+    r = COUNTERSUNK_DIAMETER / 2
+    keep = []
+    for x in xs:
+        for y in ys:
+            if (x, y) in corners or free.contains(Point(x, y).buffer(r)):
+                keep.append((x, y))
+    return keep
+
+
+def drill_slab_screw_holes(fixture_mesh, body_mesh, centers, slab_top_z, verbose=True):
+    """Drill countersunk through-holes at ``centers`` into both meshes (identical -> the
+    body+markers volume split is preserved). Called after the markers, before the lightening
+    (so the lightening keeps a disc of slab around each). Envelope unchanged."""
+    if not centers:
+        if verbose:
+            print('[slab_screws] no grid point cleared the pockets / markers')
+        return fixture_mesh, body_mesh
+    holes = []
+    for x, y in centers:
+        h = generate_countersunk_hole(COUNTERSUNK_DIAMETER, HOLE_DIAMETER, slab_top_z)
+        h.apply_translation([x, y, 0.0])
+        holes.append(h)
+
+    def _drill(mesh):
+        for h in holes:
+            mesh = trimesh.boolean.difference([mesh, h], engine='manifold', check_volume=False)
+        return mesh
+
+    fixture_out = _drill(fixture_mesh)
+    body_out = fixture_out if body_mesh is fixture_mesh else _drill(body_mesh)
+    if verbose:
+        print(f'[slab_screws] {len(centers)} countersunk holes @ {SCREW_PITCH:g} cm pitch: '
+              f'{[(round(x, 1), round(y, 1)) for x, y in centers]}')
+    return fixture_out, body_out
+
+
+def _ear_hole_layout(bounds, slab_top_z):
+    """Screw-hole centres (native XY) for the mounting ears, plus the ear tabs that carry
+    them. Holes sit ``EAR_STICKOUT`` past the -X, +X and +Y body edges (never the -Y,
+    robot-facing edge); neighbours on an edge are ``SCREW_PITCH`` apart, centred on the
+    edge. Returns ``(hole_centers, tab_meshes)``."""
+    (x_lo, y_lo, _), (x_hi, y_hi, _) = bounds[0], bounds[1]
+
+    def _spread(center, half_span):
+        n = int((half_span - EAR_MARGIN) // SCREW_PITCH)
+        return [center + k * SCREW_PITCH for k in range(-n, n + 1)]
+
+    edges = [  # (axis of the row, fixed coord of the hole, list of the free coord)
+        ('y', x_lo - EAR_STICKOUT, _spread(0.5 * (y_lo + y_hi), 0.5 * (y_hi - y_lo))),  # -X
+        ('y', x_hi + EAR_STICKOUT, _spread(0.5 * (y_lo + y_hi), 0.5 * (y_hi - y_lo))),  # +X
+        ('x', y_hi + EAR_STICKOUT, _spread(0.5 * (x_lo + x_hi), 0.5 * (x_hi - x_lo))),  # +Y
+    ]
+    hole_centers, tabs = [], []
+    for axis, fixed, frees in edges:
+        for f in frees:
+            hx, hy = (f, fixed) if axis == 'x' else (fixed, f)
+            hole_centers.append((hx, hy))
+            if axis == 'x':      # +Y ear: tab bridges y_hi -> past the hole
+                lo, hi = [hx - EAR_HALF_W, y_hi - 0.3], [hx + EAR_HALF_W, hy + EAR_HALF_W]
+            elif fixed < 0:      # -X ear
+                lo, hi = [hx - EAR_HALF_W, hy - EAR_HALF_W], [x_lo + 0.3, hy + EAR_HALF_W]
+            else:                # +X ear
+                lo, hi = [x_hi - 0.3, hy - EAR_HALF_W], [hx + EAR_HALF_W, hy + EAR_HALF_W]
+            tabs.append(trimesh.creation.box(bounds=[[lo[0], lo[1], 0.0],
+                                                     [hi[0], hi[1], slab_top_z]]))
+    return hole_centers, tabs
+
+
+def add_mounting_ears_to_fixture(fixture_mesh, body_mesh, slab_top_z, verbose=True):
+    """Fuse the mounting-ear tabs onto the fixture and drill their countersunk holes.
+
+    Applied last (after the bottom-plate lightening) so nothing downstream re-analyses the
+    slab. The ears grow the XY envelope outward on the -X / +X / +Y edges only; the mold
+    islands, pockets, ArUco markers and pickup poses are all untouched. ``fixture_mesh``
+    and ``body_mesh`` get the identical tabs + holes so the body+markers volume split holds.
+    """
+    hole_centers, tabs = _ear_hole_layout(fixture_mesh.bounds, slab_top_z)
+    holes = []
+    for hx, hy in hole_centers:
+        h = generate_countersunk_hole(COUNTERSUNK_DIAMETER, HOLE_DIAMETER, slab_top_z)
+        h.apply_translation([hx, hy, 0.0])
+        holes.append(h)
+
+    def _apply(mesh):
+        mesh = trimesh.boolean.union([mesh] + tabs, engine='manifold', check_volume=False)
+        for h in holes:
+            mesh = trimesh.boolean.difference([mesh, h], engine='manifold', check_volume=False)
+        return mesh
+
+    fixture_out = _apply(fixture_mesh)
+    body_out = fixture_out if body_mesh is fixture_mesh else _apply(body_mesh)
+    assert fixture_out.body_count == 1 and body_out.body_count == 1, \
+        f'mounting ears split the fixture ({fixture_out.body_count} / {body_out.body_count} bodies)'
+    if verbose:
+        print(f'[mounting_ears] {len(hole_centers)} screw holes on ears; '
+              f'envelope {np.round(fixture_mesh.extents, 1).tolist()} -> '
+              f'{np.round(fixture_out.extents, 1).tolist()} cm')
+    return fixture_out, body_out
+
+
+def lighten_fixture_bottom(fixture_mesh, body_mesh, markers_meta, slab_top_z,
+                           pad_centers=(), min_cutout_area=None, verbose=True):
+    """Carve the dead flat plate out of the ``z <= slab_top_z`` slab layer.
+
+    The generated fixture has a solid full-footprint bottom slab; for a typical assembly
+    that slab is ~45 % of the whole part and almost all of it is connective plate that
+    carries nothing. This intersects *only* the slab layer with a keep mask made of a
+    perimeter rail + a flange under every carved pocket + a bed under every ArUco marker +
+    a disc around every countersunk pad + cross ribs that tie them together. Everything at
+    ``z > slab_top_z`` (the mold islands) and the fixture bounding box are untouched, so
+    the plan, the pickup poses, the marker layout and the mounting holes are unaffected.
+
+    ``min_cutout_area`` (cm^2, default ``MIN_CUTOUT_AREA``): windows smaller than this are
+    left solid instead of opened, so the print does not fill up with tiny holes.
+
+    ``fixture_mesh`` and ``body_mesh`` are lightened with the identical mask so the
+    ``vol(body) + vol(markers) == vol(fixture)`` split still holds. Returns them lightened.
+    """
+    if min_cutout_area is None:
+        min_cutout_area = MIN_CUTOUT_AREA
+    from shapely.geometry import box as _box, LineString, Point
+    from shapely.ops import unary_union, nearest_points
+
+    b0 = fixture_mesh.bounds.copy()
+    slab = _section_polygon(fixture_mesh, slab_top_z - 0.10)
+    island = _section_polygon(fixture_mesh, slab_top_z + 0.15)
+    if slab is None or island is None:
+        if verbose:
+            print('[lighten_bottom] could not slice slab/island; leaving the bottom solid')
+        return fixture_mesh, body_mesh
+
+    sx_lo, sy_lo, sx_hi, sy_hi = slab.bounds
+    keep = [island.buffer(FLOOR_POCKET_FLANGE)]                 # bed under every pocket
+    if FLOOR_FRAME_W > 0:
+        keep.append(slab.difference(slab.buffer(-FLOOR_FRAME_W)))   # perimeter rail
+
+    # bed under every ArUco marker (native-frame corners straight from markers.json payload)
+    for mk in (markers_meta or {}).get('markers', []):
+        xs = [c[0] for c in mk['corners']]
+        ys = [c[1] for c in mk['corners']]
+        keep.append(_box(min(xs), min(ys), max(xs), max(ys)).buffer(FLOOR_MARKER_MARGIN))
+
+    # cross ribs through the island centroid, spanning the whole footprint -> every bed is
+    # tied to the rail and the result stays a single connected body
+    icx, icy = island.centroid.x, island.centroid.y
+    keep.append(LineString([(sx_lo, icy), (sx_hi, icy)]).buffer(FLOOR_RIB_W / 2))
+    keep.append(LineString([(icx, sy_lo), (icx, sy_hi)]).buffer(FLOOR_RIB_W / 2))
+
+    # a solid boss around every in-slab screw hole + the shortest rib tying it into whatever
+    # is already kept, so no hole boss floats after the cut (empty when mounting on ears)
+    anchor = unary_union([g for g in keep if not g.is_empty])
+    for pcx, pcy in pad_centers:
+        keep.append(Point(pcx, pcy).buffer(PAD_DIAMETER / 2 + FLOOR_PAD_MARGIN))
+        tie = nearest_points(Point(pcx, pcy), anchor)[1]
+        keep.append(LineString([(pcx, pcy), (tie.x, tie.y)]).buffer(FLOOR_RIB_W / 2))
+
+    keep_poly = unary_union([g for g in keep if not g.is_empty])
+
+    # leave small windows solid -- lots of tiny holes only cost print time
+    if min_cutout_area and min_cutout_area > 0:
+        removed = slab.difference(keep_poly)
+        smalls = [g for g in (removed.geoms if removed.geom_type == 'MultiPolygon' else [removed])
+                  if (not g.is_empty) and g.area < min_cutout_area]
+        if smalls:
+            keep_poly = unary_union([keep_poly, *smalls])
+            if verbose:
+                print(f'[lighten_bottom] kept {len(smalls)} sub-{min_cutout_area:g} cm^2 window(s) solid')
+
+    # guarantee one connected body: weld every stray keep-region to the largest with a rib
+    if keep_poly.geom_type == 'MultiPolygon':
+        parts = sorted(keep_poly.geoms, key=lambda g: g.area, reverse=True)
+        main = parts[0]
+        for g in parts[1:]:
+            p1, p2 = nearest_points(g, main)
+            main = unary_union([main, g, LineString([p1, p2]).buffer(FLOOR_RIB_W / 2)])
+        keep_poly = main
+        if verbose and len(parts) > 1:
+            print(f'[lighten_bottom] welded {len(parts) - 1} stray keep-region(s)')
+
+    geoms = list(keep_poly.geoms) if keep_poly.geom_type == 'MultiPolygon' else [keep_poly]
+    mask = trimesh.boolean.union(
+        [trimesh.creation.extrude_polygon(g, height=slab_top_z) for g in geoms] +
+        [trimesh.creation.box(bounds=[[b0[0][0], b0[0][1], slab_top_z],
+                                      [b0[1][0], b0[1][1], b0[1][2] + 0.1]])],
+        engine='manifold', check_volume=False)
+
+    out = []
+    for mesh in (fixture_mesh, body_mesh):
+        out.append(trimesh.boolean.intersection([mesh, mask], engine='manifold', check_volume=False))
+    fixture_light, body_light = out
+
+    assert np.allclose(fixture_light.bounds, b0, atol=1e-3), \
+        f'bottom lightening moved the fixture bbox: {b0.tolist()} -> {fixture_light.bounds.tolist()}'
+    assert fixture_light.body_count == 1 and body_light.body_count == 1, \
+        f'bottom lightening split the fixture ({fixture_light.body_count} / {body_light.body_count} bodies)'
+    if verbose:
+        print(f'[lighten_bottom] fixture volume {fixture_mesh.volume:.1f} -> {fixture_light.volume:.1f} cm^3 '
+              f'({100 * (1 - fixture_light.volume / fixture_mesh.volume):.0f}% lighter)')
+    return fixture_light, body_light
+
+
+def render_marker_preview(body_mesh, markers_mesh, out_path):
+    """Near-top-down preview: light body, dark flush ArUco inlays."""
+    body = body_mesh.copy()
+    body.visual.face_colors = [225, 225, 225, 255]
+    mk = markers_mesh.copy()
+    mk.visual.face_colors = [10, 10, 10, 255]
+    scene = trimesh.Scene([body, mk])
+    scene.set_camera(angles=[np.deg2rad(40), 0, 0], center=body.centroid,
+                     distance=body.scale * 1.15)
+    with open(out_path, 'wb') as fp:
+        fp.write(scene.save_image(resolution=(1600, 1230), visible=False))
+
+
+def run_fixture_gen(assembly_dir, log_dir, optimized, seed, render=False, markers='aruco',
+                    min_cutout_area=None):
     import pyglet
     pyglet.options["headless"] = not render
 
@@ -438,10 +747,55 @@ def run_fixture_gen(assembly_dir, log_dir, optimized, seed, render=False):
     for part_id, part_mesh in part_meshes_pickup.items():
         part_mesh.apply_translation(part_translation)
 
-    # add countersunk pads to fixture
-    fixture_mesh = add_countersunk_pads_to_fixture(fixture_mesh, min_fixture_y)
-    fixture_size = fixture_mesh.vertices.max(axis=0)[:2] - fixture_mesh.vertices.min(axis=0)[:2]
-    # print(f'assembly_dir: {assembly_dir}, fixture size: {fixture_size}, fixture area: {np.prod(fixture_size)}')
+    # add the mounting screw holes: 'corners' -> in-slab pads now; 'slab' -> grid holes
+    # after the markers; 'ears' -> tabs added last (all below).
+    pad_centers = ()
+    if MOUNT_STYLE == 'corners':
+        fixture_mesh, pad_centers = add_countersunk_pads_to_fixture(fixture_mesh, min_fixture_y)
+    elif markers != 'none':
+        fixture_mesh = widen_fixture_rim_for_markers(fixture_mesh)
+    if MOUNT_STYLE == 'slab':
+        pad_centers = slab_hole_corners(fixture_mesh)  # keep the marker rows off the corners
+
+    # add flush multi-material ArUco markers to the fixture perimeter (does not touch the plan:
+    # markers are recessed into the existing slab, fixture envelope + pickup poses unchanged)
+    body_mesh, markers_mesh, markers_meta = fixture_mesh, None, None
+    if markers != 'none':
+        pickup_before = json.dumps(pose_pickup, sort_keys=True)
+        fixture_mesh, body_mesh, markers_mesh, markers_meta = add_aruco_markers_to_fixture(
+            fixture_mesh, min_fixture_y, BOTTOM_THICKNESS, pad_centers=pad_centers)
+        assert json.dumps(pose_pickup, sort_keys=True) == pickup_before, 'markers mutated pickup poses'
+
+    # 'slab': drill the 5 cm-grid screw holes into the still-solid slab, before the lightening
+    if MOUNT_STYLE == 'slab':
+        pad_centers = plan_slab_screw_holes(fixture_mesh, markers_meta, BOTTOM_THICKNESS)
+        fixture_mesh, body_mesh = drill_slab_screw_holes(
+            fixture_mesh, body_mesh, pad_centers, BOTTOM_THICKNESS)
+        if markers_mesh is not None:
+            assert abs((body_mesh.volume + markers_mesh.volume) - fixture_mesh.volume) < 1e-2, \
+                'slab screw holes broke the body + markers volume split'
+
+    # strip the dead flat plate out of the bottom slab (mold islands / bbox / plan untouched)
+    if LIGHTEN_BOTTOM:
+        fixture_mesh, body_mesh = lighten_fixture_bottom(
+            fixture_mesh, body_mesh, markers_meta, BOTTOM_THICKNESS,
+            pad_centers=pad_centers, min_cutout_area=min_cutout_area)
+        if markers_mesh is None:
+            body_mesh = fixture_mesh
+        else:
+            assert abs((body_mesh.volume + markers_mesh.volume) - fixture_mesh.volume) < 1e-2, \
+                'bottom lightening broke the body + markers volume split'
+
+    # mounting ears: fused on last so nothing downstream re-analyses the slab. Grows the
+    # XY envelope outward on the -X / +X / +Y edges only (pockets / markers / plan intact).
+    if MOUNT_STYLE == 'ears':
+        fixture_mesh, body_mesh = add_mounting_ears_to_fixture(
+            fixture_mesh, body_mesh, BOTTOM_THICKNESS)
+        if markers_mesh is None:
+            body_mesh = fixture_mesh
+        else:
+            assert abs((body_mesh.volume + markers_mesh.volume) - fixture_mesh.volume) < 1e-2, \
+                'mounting ears broke the body + markers volume split'
 
     scene = trimesh.Scene([fixture_mesh] + list(part_meshes_pickup.values()))
     if render:
@@ -461,7 +815,28 @@ def run_fixture_gen(assembly_dir, log_dir, optimized, seed, render=False):
     fixture_mesh.export(os.path.join(fixture_dir, 'fixture.obj'))
     with open(os.path.join(fixture_dir, 'fixture.png'), 'wb') as fp:
         fp.write(scene.save_image(visible=False))
-    
+
+    # multi-material print + perception artifacts
+    if markers_meta is not None:
+        with open(os.path.join(fixture_dir, 'markers.json'), 'w') as fp:
+            json.dump(markers_meta, fp, indent=2)
+    if markers_mesh is not None:
+        body_mm = body_mesh.copy();    body_mm.apply_scale(10.0)
+        mk_mm = markers_mesh.copy();   mk_mm.apply_scale(10.0)
+        body_mm.export(os.path.join(fixture_dir, 'fixture_body.stl'))
+        mk_mm.export(os.path.join(fixture_dir, 'fixture_markers.stl'))
+        try:  # single-file two-colour object; optional (needs a 3mf writer)
+            b, m = body_mm.copy(), mk_mm.copy()
+            b.visual.face_colors = [210, 210, 210, 255]
+            m.visual.face_colors = [15, 15, 15, 255]
+            trimesh.Scene({'fixture_body': b, 'fixture_markers': m}).export(
+                os.path.join(fixture_dir, 'fixture.3mf'))
+        except Exception as e:
+            print(f'[run_fixture_gen] 3mf export skipped: {e}')
+        render_marker_preview(body_mesh, markers_mesh,
+                              os.path.join(fixture_dir, 'fixture_markers.png'))
+
+
     stats_path = os.path.join(log_dir, 'stats.json')
     with open(stats_path, 'r') as fp:
         stats = json.load(fp)
@@ -479,6 +854,16 @@ if __name__ == '__main__':
     parser.add_argument('--optimized', default=False, action='store_true')
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--render', default=False, action='store_true')
+    parser.add_argument('--markers', choices=['none', 'aruco'], default='aruco',
+                        help="'aruco': inlay a flush multi-material ArUco board into the fixture "
+                             "perimeter (default). 'none': legacy behaviour.")
+    parser.add_argument('--min-cutout-area', type=float, default=None,
+                        help="bottom-plate lightening: only open a slab window whose footprint "
+                             f"exceeds this many cm^2 (default {MIN_CUTOUT_AREA:g}); smaller "
+                             "cut-outs stay solid so the print isn't full of tiny holes. "
+                             "0 = open every window.")
     args = parser.parse_args()
 
-    run_fixture_gen(args.assembly_dir, args.log_dir, args.optimized, args.seed, render=args.render)
+    run_fixture_gen(args.assembly_dir, args.log_dir, args.optimized, args.seed,
+                    render=args.render, markers=args.markers,
+                    min_cutout_area=args.min_cutout_area)

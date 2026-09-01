@@ -280,30 +280,37 @@ def run_motion_plan(assembly_dir, log_dir, optimized, seed, verbose=False):
         if pickup_q_move is None:
             raise Exception(f'[run_motion_plan] Failed to solve pickup IK for move arm in step {step} ({assembly_dir})')
         gripper_pickup_pose[part_move] = get_pickup_gripper_pose(grasps_move[0], part_pickup_pose[part_move], part_final_pose[part_move])
-        commands.append(['move', 'arm', (pickup_q_move, [None, None], open_ratio_retract_move), None, 'switch']) # transport with both retract and open gripper
+        commands.append(['move', 'arm', (pickup_q_move, [None, None], open_ratio_retract_move), part_move, 'switch']) # transport with both retract and open gripper; active_part = the part being approached (excluded from the switch collision scene, like get_pickup_arm_q)
         commands.append(['move', 'gripper', grasps_move[0].open_ratio, None, 'close'])
         commands.append(['move', 'arm', (grasps_move[-1].arm_q, [np.array([0, 0, 1.0]), get_disassembly_retract_dir(motion_planner_move, grasps_move[0].arm_q, grasps_move[-1].arm_q)]), part_move, 'transport']) # transport with both retract
         commands.append(['move', 'arm', grasps_move[0].arm_q, part_move, 'assembly'])
 
-        # hold (switch/rest)
+        # move (rest) -- retract the inserter arm clear of the assembly BEFORE the holder
+        # regrasp switch (and before the next step's own move switch). The committed schedule
+        # only did this on the last step, leaving the inserter parked at its assembly pose:
+        # plan_path_switch then plans the holder regrasp against it (holder<->inserter
+        # collision) and the next move switch starts from a config that grazes the growing
+        # sub-assembly ("start is in collision"). Retracting here every step is what the
+        # 2026-08-21 reference plan did. kuka-only so the validated Panda schedule is untouched.
+        commands.append(['move', 'gripper', open_ratio_retract_move, None, 'open'])
+        if arm_type == 'kuka' or step == len(sequence) - 1:
+            commands.append(['move', 'arm', (rest_q_move, [None, None]), None, 'transport']) # transport with start retract
+        if step == len(sequence) - 1:
+            commands.append(['move', 'gripper', OPEN_RATIO_REST, None, 'close'])
+
+        # hold (switch/rest) -- now planned with the inserter parked at rest_q_move
         open_ratio_retract_hold = min(grasp_hold.open_ratio + RETRACT_OPEN_RATIO, 1.0)
         if step < len(sequence) - 1:
             grasp_hold_next = grasps_sequence[step + 1][1]
             if not (grasp_hold.part_id == grasp_hold_next.part_id and grasp_hold.grasp_id == grasp_hold_next.grasp_id):
                 open_ratio_retract_hold_next = min(grasp_hold_next.open_ratio + RETRACT_OPEN_RATIO, 1.0)
                 commands.append(['hold', 'gripper', open_ratio_retract_hold, None, 'open'])
-                commands.append(['hold', 'arm', (grasp_hold_next.arm_q, [None, None], open_ratio_retract_hold_next), None, 'switch']) # transport with both retract and open gripper
+                commands.append(['hold', 'arm', (grasp_hold_next.arm_q, [None, None], open_ratio_retract_hold_next), grasp_hold_next.part_id, 'switch']) # transport with both retract and open gripper; active_part = the (re)grasp target, excluded from the switch collision scene
                 commands.append(['hold', 'gripper', grasp_hold_next.open_ratio, None, 'close'])
         else:
             commands.append(['hold', 'gripper', open_ratio_retract_hold, None, 'open'])
             commands.append(['hold', 'arm', (rest_q_hold, [None, None]), None, 'transport']) # transport with start retract
             commands.append(['hold', 'gripper', OPEN_RATIO_REST, None, 'close'])
-        
-        # move (rest)
-        commands.append(['move', 'gripper', open_ratio_retract_move, None, 'open'])
-        if step == len(sequence) - 1:
-            commands.append(['move', 'arm', (rest_q_move, [None, None]), None, 'transport']) # transport with start retract
-            commands.append(['move', 'gripper', OPEN_RATIO_REST, None, 'close'])
 
         placed_parts.add(part_move)  # assembled -> now at its final pose for later pickup-IK scenes
 
@@ -401,15 +408,21 @@ def run_motion_plan(assembly_dir, log_dir, optimized, seed, verbose=False):
                 current_states[motion_type][body_type] = q_goal
 
             elif task == 'switch':
-                assert active_part is None
                 q_goal, [retract_start, retract_goal], open_ratio_next = value
                 if retract_start is None: retract_start = get_back_retract_dir(motion_planner, q_start)
                 if retract_goal is None: retract_goal = get_back_retract_dir(motion_planner, q_goal)
 
+                # The switch drives the (open, reduced-open-ratio) gripper right up to the part
+                # it is about to grasp (active_part). Keeping that part in the collision scene
+                # makes plan_path_switch's own goal / retract-IK checks fail on the intended
+                # contact -- the same reason get_pickup_arm_q (collision-aware pickup IK) drops
+                # it. Exclude active_part here too; neighbours + fixture + the other arm stay in.
+                part_meshes_switch = [v for k, v in part_meshes_curr.items() if k != active_part] + [fixture_mesh]
+
                 # TODO: update
                 try:
                     path1, path2 = motion_planner.plan_path_switch(q_start, q_goal,
-                            part_meshes=list(part_meshes_curr.values()) + [fixture_mesh], open_ratio=open_ratio, open_ratio_next=open_ratio_next,
+                            part_meshes=part_meshes_switch, open_ratio=open_ratio, open_ratio_next=open_ratio_next,
                             arm_chain_other=arm_chain_other, arm_q_other=arm_q_other, open_ratio_other=open_ratio_other, has_ft_sensor_other=has_ft_sensor[motion_type_other],
                             retract_start=retract_start, retract_goal=retract_goal, retract_delta=RETRACT_DELTA_FAR,
                             max_speed=max_speed[task], verbose=verbose)
