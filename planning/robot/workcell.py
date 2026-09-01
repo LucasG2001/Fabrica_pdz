@@ -119,14 +119,37 @@ def get_single_arm_euler():
     return get_move_arm_euler()
 
 
+# SHORT-TERM FIX (2026-08-30): the +/-[.,.,80] / -[.,.,0] z half-extents below are
+# Panda-inherited. The taller KUKA iiwa7 sitting on its 2.5cm riser (get_kuka_mount_block_height,
+# baked into get_*_arm_pos z) does NOT fit this envelope at its own rest_q: the buffered arm
+# collision meshes span z in [+2.3, +82.9]cm vs the box's [+2.5, +82.5], overrunning ~2mm at the
+# floor and ~4mm at the ceiling. motion_plan_arm's collision_fn folds that box-shell hit into an
+# "arm and ground" collision, so every transport path that starts or ends at rest_q fails. The
+# committed pipeline never hit this because it aborts earlier at pickup IK. Widen the KUKA z-band
+# (floor to ~ground, ceiling +10cm) to clear it; x/y are unchanged. Proper fix is to re-derive
+# get_*_arm_box from the real iiwa7 workspace.
+_KUKA_ARM_BOX_DZ = np.array([0.0, 0.0, 10.0])
+_KUKA_ARM_BOX_Z0 = 0.0  # floor of the KUKA arm box in world z (below the 2.5cm riser base)
+
+
 def get_move_arm_box(arm_type):
     arm_pos = get_move_arm_pos(arm_type)
-    return arm_pos - np.array([100.0, 100.0, 0.0]), arm_pos + np.array([30.0, 50.0, 80.0])
+    lower = arm_pos - np.array([100.0, 100.0, 0.0])
+    upper = arm_pos + np.array([30.0, 50.0, 80.0])
+    if arm_type == 'kuka':
+        lower[2] = _KUKA_ARM_BOX_Z0
+        upper = upper + _KUKA_ARM_BOX_DZ
+    return lower, upper
 
 
 def get_hold_arm_box(arm_type):
     arm_pos = get_hold_arm_pos(arm_type)
-    return arm_pos - np.array([30.0, 100.0, 0.0]), arm_pos + np.array([100.0, 50.0, 80.0])
+    lower = arm_pos - np.array([30.0, 100.0, 0.0])
+    upper = arm_pos + np.array([100.0, 50.0, 80.0])
+    if arm_type == 'kuka':
+        lower[2] = _KUKA_ARM_BOX_Z0
+        upper = upper + _KUKA_ARM_BOX_DZ
+    return lower, upper
 
 
 def get_dual_arm_box(arm_type):
@@ -158,7 +181,29 @@ def get_fixture_min_y(arm_type):
     elif arm_type == 'panda':
         return 4 * dx
     elif arm_type == 'kuka':
-        return 4 * dx
+        # SHORT-TERM FIX (2026-08-30): the +4*dx value is inherited verbatim from Panda, whose
+        # arm bases sit at large +y with the assembly at y=-6*dx; there a fixture packed into
+        # [+4*dx, +4*dx+bin_y] lands in front of the arms. The KUKA bases are at y=+10 (roughly
+        # on the +4*dx line) and yaw -90deg to face -y, so that same packing frame puts the
+        # fixture behind/under the bases -> pickup IK is unreachable (parts 2, 3).
+        #
+        # min_fixture_y is the near (min-y) edge of the packing bin and of the carved fixture
+        # box (see generate_pickup_pose / generate_fixture in run_fixture_gen.py), and it enters
+        # the global pickup pose as a pure additive y offset. Setting it to -62.7 places the
+        # fixture footprint at y in [-62.7, -62.7+bin_y] ~ [-62.7, -42.7], i.e. beyond the
+        # assembly (y=-15), in front of both arms -- matching the known-good, dense-insertion-
+        # validated layout recorded in logs/plumbers_block_sim/validation.json (fixture
+        # footprint [-12.5,-62.7]..[12.5,-42.7]) and the 2026-08-21 motion.pkl solved against
+        # it. Proper fix is to decouple the board layout from the assembled-part transform and
+        # add an IK-reachability gate; see docs/fixture_pickup_unreachable_handoff.md.
+        #
+        # -62.7 reproduces validation.json's footprint exactly but leaves the farthest parts
+        # (~y=-60) at the very edge of iiwa7 reach -> move-arm pickup IK fails mid-plan. -52
+        # pulls the layout ~11cm toward the arms (parts land ~y in [-49, -30], still well beyond
+        # the assembly at y=-15); every pickup IK then solves, and run_motion_plan's pickup IK
+        # is made collision-aware (inverse_kinematics_collision_free) so the config it returns is
+        # actually free of the fixture / neighbouring parts.
+        return -52.0
     elif arm_type == 'ur5e':
         return 6 * dx
     else:
