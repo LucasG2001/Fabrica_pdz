@@ -323,7 +323,54 @@ the `arm_box` z-band widening (shortfix patches #1, #2) can be retired.
 
 ---
 
-## 8. Status / next steps
+## 8. What the 2026-08-21 reference plan actually used
+
+The fixture side is recoverable from tracked artifacts; the arm base pose is not recorded
+and is a dated inference.
+
+### Fixture configuration — recorded
+
+`git show a72a768:logs/plumbers_block_sim/fixture/fixture.obj` and the still-on-disk
+`logs/plumbers_block_sim/validation.json` both describe the Aug-21 fixture:
+
+- **`min_fixture_y = −62.7`** (the board `box_min.y`, `run_fixture_gen.py:320`). Footprint
+  **x ∈ [−12.5, 12.5], y ∈ [−62.7, −42.7], z ∈ [0, 4.5]** (20 × 20 × 4.5 cm), centred in X,
+  ~48 cm in front of the arm bases, ~28–48 cm beyond the assembly at y = −15. Current
+  committed KUKA value is `+10`; the shortfix uses `−52` (pulled ~11 cm toward the arms).
+- **Part pickup poses** — `git show a72a768:logs/plumbers_block_sim/fixture/pickup.json`:
+  y ∈ [−58.7, −46.7], x ∈ [−2.4, 12.4]; parts 2/3/1 at **yaw ≈ π**, part 0 at ≈ π/2,
+  part 4 at ≈ 1.95. Those orientations **predate commit `253a3f4`** (the ~90° pdz
+  gripper-basis swap), so no current code reproduces them — the new plan's pickups are at
+  yaw ≈ π/2.
+- `--optimized` (`tree_opt.pkl`), order 2 (base) / 3 / 1 / 0 / 4, no `--markers` (didn't
+  exist). `stats.json`: `fixture_gen 0.86 s`, `motion_plan 280.08 s`.
+
+### Base pose — inferred, not recorded
+
+No artifact stores it. `commands.pkl` is dated 2026-08-21, so committed `workcell.py` then
+was `931de5c` (2026-08-18):
+
+- `get_move_arm_pos('kuka') = (18·dx, 8·dx, riser) = (45, 20, 2.5)`
+- `get_hold_arm_pos('kuka') = (−45, 20, 2.5)`
+- both yaw `−π/2`; **±45 cm** X-separation (Panda's), **Y = 20**, on the 2.5 cm riser.
+
+The 2026-08-24 retune (`53e1213` → `a72a768`) narrowed X-separation to **±42** (`16.8·dx`)
+"to match the real rig" and later dropped **Y to 10** — current `main` is `(±42, 10, 2.5)`.
+The shortfix reconstruction attributes the discarded local edits only to
+`get_fixture_min_y` / `get_assembly_center` (board Y origin), not the arm bases, so the
+Aug-21 plan most plausibly ran on `931de5c`'s `(±45, 20, 2.5)` bases.
+
+### Caveat
+
+Per `fixture_min_y_shortfix_handoff.md` §1, the Aug-21 fixture layout **cannot be
+reproduced from any committed code + the current `grasps.pkl`** — it needed local
+uncommitted `workcell.py` edits (a ~62–72 cm more-negative board-Y origin) that were later
+discarded. `validation.json` + `a72a768:…/pickup.json` + `a72a768:…/fixture.obj` are the
+surviving ground truth for the fixture; the base pose is a dated inference.
+
+---
+
+## 9. Status / next steps
 
 - [x] Confirmed the sim collision is holder↔inserter during the part-0 (`pb_pipe`) holder
       regrasp `switch`, produced by the `MOTION_PLAN_ALLOW_COLLISION` straight-line
